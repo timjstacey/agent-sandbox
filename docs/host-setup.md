@@ -57,7 +57,7 @@ The wrapper script handles this for you:
 ./bin/agent-sandbox setup
 ```
 
-This grants the `agent` user POSIX ACL access to each required host path and prints a warning for any paths that don't exist yet (e.g. `~/.claude/.credentials.json` before first login). Re-run it after authenticating with Claude Code or GitHub CLI if you hit those warnings.
+This grants the `agent` user POSIX ACL access to each required host path and creates an agent-owned repo-local Claude state dir (`./.claude/` and `./.claude.json`). The container's Claude session is separate from your host's — first run inside the container will prompt `/login` once, and the credentials persist in the repo-local dir (gitignored). Re-run setup after authenticating with GitHub CLI or Gitea CLI if you hit warnings about their config dirs.
 
 The script requires `sudo` to call `setfacl`. If your terminal blocks `sudo` due to `no_new_privs` (common in Flatpak terminals), open a native terminal first.
 
@@ -68,8 +68,6 @@ ACLs are an extension to standard Unix permissions. `setfacl` adds per-user entr
 | Path | Permission | Reason |
 |---|---|---|
 | `~` | `x` (traverse) | Home dirs are `700`; agent needs to enter without being able to list |
-| `~/.claude` | `rwX` + default `rwX` | Bind-mounted rw so credentials, session history, and refreshed tokens are shared with the host |
-| `~/.claude.json` | `rw` | Bind-mounted rw so account state (oauthAccount, userID) is shared — one host login covers the container |
 | `~/.gitconfig` | `r` | Bind-mounted read-only so agent can commit with your identity |
 | `~/Repositories` | `rwX` + default `rwX` | Agent reads and writes code here; default ACL propagates to new repos |
 | `~/.config/gh` | `rwX` + default `rwX` | `gh` may refresh auth tokens at runtime |
@@ -102,12 +100,10 @@ If `sudo -u agent` fails due to `no_new_privs` (Flatpak terminal), open a native
 
 ---
 
-## 6. Note on token refresh
+## 6. Note on Claude Code sessions
 
-`~/.claude/` and `~/.claude.json` are bind-mounted read-write into the container. Token refreshes and `/login` from either side propagate to the other automatically — no restart required.
+The container has its own Claude Code session, persisted in the repo-local `./.claude/` directory (gitignored). It is **independent** of your host's Claude Code login — refreshes and `/login` events on either side do not affect the other. Each clone or worktree of this repository has its own container session.
 
-If a tool replaces one of these files outright instead of editing in place, the ACL entry is dropped on the new inode. Re-run setup to restore it:
+Earlier versions of this project shared `~/.claude/` and `~/.claude.json` between host and container. That sharing was removed because host Claude Code rewrites `~/.claude.json` atomically (write tempfile + rename), which strips the `agent` POSIX ACL entry on each rewrite and silently breaks the container's access to its account state.
 
-```bash
-./bin/agent-sandbox setup
-```
+If you want to wipe the container's session (e.g. switch accounts), delete `./.claude/` and `./.claude.json` then re-run `./bin/agent-sandbox setup`.

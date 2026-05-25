@@ -3,7 +3,8 @@ set -euo pipefail
 
 # --- Locate compose.yml relative to this script ---
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
-COMPOSE_FILE="${SCRIPT_DIR}/../compose.yml"
+REPO_DIR="$(readlink -f "${SCRIPT_DIR}/..")"
+COMPOSE_FILE="${REPO_DIR}/compose.yml"
 
 # --- agent user must exist for all subcommands ---
 if ! id agent >/dev/null 2>&1; then
@@ -19,17 +20,15 @@ case "${1:-}" in
 
     sudo setfacl -m u:agent:x "${HOME}"
 
-    if [[ -d "${HOME}/.claude" ]]; then
-      sudo setfacl -R -m u:agent:rwX "${HOME}/.claude"
-      sudo setfacl -R -d -m u:agent:rwX "${HOME}/.claude"
-    else
-      echo "Warning: ~/.claude not found — skipping. Re-run after 'claude' creates it." >&2
-    fi
-
-    if [[ -f "${HOME}/.claude.json" ]]; then
-      sudo setfacl -m u:agent:rw "${HOME}/.claude.json"
-    else
-      echo "Warning: ~/.claude.json not found — skipping. Re-run after 'claude' creates it." >&2
+    # Container claude state lives inside the repo (gitignored) so each clone
+    # has its own session. Pre-create so docker bind-mounts the right kind.
+    install -d -o "$(id -u agent)" -g "$(id -g agent)" -m 0700 "${REPO_DIR}/.claude" \
+      2>/dev/null \
+      || sudo install -d -o "$(id -u agent)" -g "$(id -g agent)" -m 0700 "${REPO_DIR}/.claude"
+    if [[ ! -f "${REPO_DIR}/.claude.json" ]]; then
+      sudo -u agent touch "${REPO_DIR}/.claude.json" 2>/dev/null \
+        || { touch "${REPO_DIR}/.claude.json" && sudo chown "$(id -u agent):$(id -g agent)" "${REPO_DIR}/.claude.json"; }
+      sudo chmod 0600 "${REPO_DIR}/.claude.json"
     fi
 
     if [[ -f "${HOME}/.gitconfig" ]]; then
@@ -56,13 +55,13 @@ case "${1:-}" in
   verify)
     ok=true
 
-    sudo -u agent test -r "${HOME}/.claude/.credentials.json" \
-      && echo "credentials:  OK" \
-      || { echo "credentials:  FAIL"; ok=false; }
+    sudo -u agent test -d "${REPO_DIR}/.claude" \
+      && echo "claude dir:   OK" \
+      || { echo "claude dir:   FAIL (run setup)"; ok=false; }
 
-    sudo -u agent test -w "${HOME}/.claude.json" \
+    sudo -u agent test -w "${REPO_DIR}/.claude.json" \
       && echo "session:      OK" \
-      || { echo "session:      FAIL"; ok=false; }
+      || { echo "session:      FAIL (run setup)"; ok=false; }
 
     sudo -u agent test -r "${HOME}/.gitconfig" \
       && echo "gitconfig:    OK" \
@@ -92,16 +91,11 @@ case "${1:-}" in
     ;;
 
   *)
-    # Preflight checks for container run
-    mkdir -p "${HOME}/.claude"
-
-    if ! test -d "${HOME}/.claude"; then
-      echo "Error: ~/.claude not found. Run 'claude' on the host first or './bin/agent-sandbox setup'." >&2
-      exit 1
-    fi
-
-    if ! test -f "${HOME}/.claude.json"; then
-      echo "Error: ~/.claude.json not found. Run 'claude' on the host first to create it." >&2
+    # Preflight: ensure container-local claude state exists as the right kind
+    # of inode before docker bind-mounts them (missing paths get auto-created
+    # as directories, which breaks the file mount).
+    if [[ ! -d "${REPO_DIR}/.claude" ]] || [[ ! -f "${REPO_DIR}/.claude.json" ]]; then
+      echo "Error: container claude state not initialised. Run './bin/agent-sandbox setup'." >&2
       exit 1
     fi
 
