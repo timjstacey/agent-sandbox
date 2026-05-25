@@ -1,6 +1,6 @@
 # agent-sandbox
 
-A Dockerized Claude Code sandbox. Runs Claude Code and supporting dev tooling in an isolated container against your host repositories. The container holds the agent user; your host repos and credentials are bind-mounted at runtime. Claude Code gets full control over the mounted code while your host system stays protected — the AI agent never touches anything outside the mounts.
+A Dockerized Claude Code sandbox. Runs Claude Code and supporting dev tooling in an isolated container against your host repositories. The container holds the agent user; your host repos are bind-mounted at runtime. Claude Code gets full control over the mounted code while your host system stays protected — the AI agent never touches anything outside the mounts. The container has its own Claude Code login (persisted in a repo-local, gitignored directory), independent of your host's.
 
 ## Prerequisites
 
@@ -17,14 +17,16 @@ See [docs/host-setup.md](docs/host-setup.md) for the full one-time setup walkthr
 git clone git@github.com:timjstacey/agent-sandbox.git
 cd agent-sandbox
 
-# Build — UID/GID must match the host agent user
-export AGENT_UID=$(id -u agent) AGENT_GID=$(id -g agent)
-docker compose build agent
+# One-time host setup (ACLs + repo-local container Claude state)
+./bin/agent-sandbox setup
+
+# Build — wrapper passes the host agent user's UID/GID automatically
+./bin/agent-sandbox build
 
 # Run an interactive shell inside the container
 ./bin/agent-sandbox
 
-# Or launch Claude Code directly
+# Or launch Claude Code directly (first run prompts /login once)
 ./bin/agent-sandbox claude
 ```
 
@@ -38,7 +40,7 @@ docker compose build agent
 | `fnm` + Node.js | fnm with Node.js LTS (v22) as default |
 | `pnpm`, `bun` | Installed via their official upstream scripts |
 | `typescript` | `tsc` available globally |
-| `@anthropic-ai/claude-code` | `claude` on PATH; uses your host OAuth credentials |
+| `@anthropic-ai/claude-code` | `claude` on PATH; container has its own login persisted in `./.claude/` (gitignored) |
 | Playwright MCP | Sidecar container (`mcr.microsoft.com/playwright/mcp`), auto-started via Compose and registered as an MCP server |
 | caveman skill | Baked in, auto-activated at session start to reduce token usage |
 | worktrunk skill | Baked in for git worktree management inside the container |

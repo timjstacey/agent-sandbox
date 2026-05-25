@@ -16,7 +16,8 @@ Do not re-litigate these without explicit user direction:
 |---|---|
 | Base image | `debian:trixie-slim` |
 | Playwright MCP | Sidecar container (`mcr.microsoft.com/playwright/mcp`), connected over the compose network |
-| Claude Code auth | Bind-mount host `~/.claude/.credentials.json`; entrypoint copies it into the agent's home so OAuth refresh writes succeed |
+| Claude Code auth | Container-local: bind-mount repo-relative `./.claude/` and `./.claude.json` (gitignored). Separate session from host — first container run prompts `/login` once and persists. Avoids ACL drift caused by host claude rewriting its state files atomically |
+| Container-only MCP | Loaded via `claude --mcp-config /etc/claude/mcp-config.json` injected by a shim at `$(which claude)`, so the bind-mounted `./.claude.json` is not polluted with container-only server entries |
 | Skills | Baked at build via pinned `git clone` (caveman + worktrunk); caveman auto-activates at session start to cut token usage |
 | `tea` CLI | Gitea `tea` (https://gitea.com/gitea/tea), not tea.xyz |
 | Container user | Non-root `agent`, UID/GID supplied via `--build-arg` to match a dedicated `agent` user on the host |
@@ -48,9 +49,9 @@ Do not re-litigate these without explicit user direction:
 These exist because the container exists to bridge an isolated env to the host. Don't strip them without understanding the consequence:
 
 - `AGENT_UID` / `AGENT_GID` build args — must match the host `agent` user so bind-mounted files have correct ownership.
-- POSIX ACLs on host `~/Repositories`, `~/.claude/.credentials.json`, `~/.gitconfig`, `~/.config/gh`, `~/.config/tea` — grant `agent` user rwx without changing primary ownership. Documented in `docs/host-setup.md`.
+- POSIX ACLs on host `~/Repositories`, `~/.gitconfig`, `~/.config/gh`, `~/.config/tea` — grant `agent` user rwx without changing primary ownership. Documented in `docs/host-setup.md`.
 - Mirrored bind-mount paths — `~/Repositories` on host maps to `/home/agent/Repositories` in container. Paths look identical apart from the home prefix; preserve this.
-- Credentials copy in entrypoint — host `.credentials.json` is read-only-mounted to `/tmp`; entrypoint copies it into the agent's writable home so Claude Code's OAuth refresh can write back. Refreshed tokens do **not** propagate back to host (acceptable trade-off).
+- Claude state bind-mount — repo-local `./.claude/` and `./.claude.json` (gitignored, agent-owned) are mounted rw into the container. Session is independent of the host's Claude Code login — each clone/worktree has its own container session.
 - SSH agent socket forwarding — `$SSH_AUTH_SOCK` is bind-mounted; container never holds its own SSH private keys.
 
 ## Skills are baked, pinned

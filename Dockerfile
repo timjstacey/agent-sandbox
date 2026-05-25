@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg \
     jq \
     xz-utils \
+    unzip \
+    libatomic1 \
     acl \
     bash-completion \
     && rm -rf /var/lib/apt/lists/*
@@ -56,11 +58,15 @@ RUN chmod +x /usr/local/bin/entrypoint
 USER agent
 WORKDIR /home/agent
 
-# Use login bash for all subsequent RUN layers so ~/.bashrc / profile is sourced
-SHELL ["/bin/bash", "-lc"]
+ENV SHELL=/bin/bash
+# Default terminal type — claude (and most TUIs) refuse to draw without one,
+# and `docker compose run` does not forward host TERM by default.
+ENV TERM=xterm-256color
+SHELL ["/bin/bash", "-c"]
 
 # ─── Layer 5: fnm (Fast Node Manager) ────────────────────────────────────────
 ENV FNM_DIR="/home/agent/.local/share/fnm"
+ENV PATH="${FNM_DIR}:${PATH}"
 RUN curl -fsSL https://fnm.vercel.app/install | bash \
     && echo 'eval "$(fnm env --use-on-cd --shell bash)"' >> ~/.bashrc
 
@@ -78,12 +84,10 @@ ENV PATH="/home/agent/.local/share/fnm/aliases/default/bin:${PATH}"
 
 # ─── Layer 7: pnpm ───────────────────────────────────────────────────────────
 ENV PNPM_HOME="/home/agent/.local/share/pnpm"
-ENV PATH="${PNPM_HOME}:${PATH}"
+ENV PATH="${PNPM_HOME}/bin:${PATH}"
 
 RUN eval "$(fnm env --use-on-cd --shell bash)" \
     && curl -fsSL https://get.pnpm.io/install.sh | sh - \
-    && echo 'export PNPM_HOME="/home/agent/.local/share/pnpm"' >> ~/.bashrc \
-    && echo 'case ":$PATH:" in *":$PNPM_HOME:"*) ;; *) export PATH="$PNPM_HOME:$PATH" ;; esac' >> ~/.bashrc \
     && pnpm -v
 
 # ─── Layer 8: bun ────────────────────────────────────────────────────────────
@@ -99,6 +103,31 @@ RUN curl -fsSL https://bun.sh/install | bash \
 RUN eval "$(fnm env --use-on-cd --shell bash)" \
     && npm install -g typescript @anthropic-ai/claude-code \
     && tsc -v && claude --version
+
+# ─── Layer 9b: claude shim — inject container-only MCP config ────────────────
+# ~/.claude.json is bind-mounted rw from the host, so we must NOT write
+# container-only MCP servers into it. Instead the shim invokes claude with
+# --mcp-config pointing at an image-baked file. The npm-installed claude is
+# renamed to claude.real; the shim takes its place on PATH.
+USER root
+RUN CLAUDE_BIN="$(command -v claude)" \
+    && test -n "${CLAUDE_BIN}" \
+    && mv "${CLAUDE_BIN}" "${CLAUDE_BIN}.real" \
+    && printf '%s\n' \
+       '#!/bin/bash' \
+       'exec "$(dirname "$(readlink -f "$0")")/claude.real" --mcp-config /etc/claude/mcp-config.json "$@"' \
+       > "${CLAUDE_BIN}" \
+    && chmod +x "${CLAUDE_BIN}" \
+    && chown agent:agent "${CLAUDE_BIN}" "${CLAUDE_BIN}.real" \
+    && install -d -o agent -g agent /home/agent/.local/bin \
+    && ln -s "${CLAUDE_BIN}" /home/agent/.local/bin/claude
+USER agent
+
+# Host ~/.claude.json (bind-mounted) records installMethod=native and expects
+# the binary at ~/.local/bin/claude. Prepend that dir to PATH so the symlink
+# above resolves first; the shim's readlink -f then jumps to claude.real in
+# the fnm bin dir, finding claude.real alongside it.
+ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # ─── Layer 10: Clone skills + symlinks (caveman + worktrunk) ─────────────────
 # caveman  pinned @ ef6050c (2026-05-25)
@@ -120,8 +149,13 @@ USER agent
 COPY --chown=agent:agent docker/settings.json /home/agent/.claude/settings.json
 
 # ─── Layer 12: Bake MCP server config (Playwright sidecar) ───────────────────
-# Claude Code reads user-scoped MCP servers from ~/.claude.json.
-COPY --chown=agent:agent docker/mcp-config.json /home/agent/.claude.json
+# Loaded by the claude shim via --mcp-config so container-only servers stay out
+# of the host-shared ~/.claude.json. Path is fixed; the shim references it.
+USER root
+RUN mkdir -p /etc/claude
+COPY docker/mcp-config.json /etc/claude/mcp-config.json
+RUN chmod 0644 /etc/claude/mcp-config.json
+USER agent
 
 # ─── Final configuration ─────────────────────────────────────────────────────
 WORKDIR /home/agent/Repositories

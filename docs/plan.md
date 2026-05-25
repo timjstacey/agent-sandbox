@@ -17,7 +17,7 @@ Goals:
 |---|---|
 | Base image | `debian:trixie-slim` |
 | Playwright MCP | Sidecar container (Microsoft's `mcr.microsoft.com/playwright/mcp` or equivalent), connected over compose network |
-| Claude Code auth | Bind mount host `~/.claude/.credentials.json`; entrypoint copies into agent home so OAuth refresh writes succeed |
+| Claude Code auth | Container-local: bind-mount repo-relative `./.claude/` and `./.claude.json` (gitignored). Separate session from host login (first run does `/login` once and persists). Earlier designs shared host `~/.claude*` directly; abandoned because host claude rewrites those files atomically and strips the agent's POSIX ACL |
 | Skills delivery | Baked at build via `git clone` (pinned commits); caveman skill auto-activated at session start to reduce token usage |
 | `tea` CLI | Gitea `tea` (https://gitea.com/gitea/tea) |
 | Container user | Non-root `agent`, UID/GID via `--build-arg` matching host `agent` user |
@@ -86,7 +86,8 @@ Two services on shared internal network:
   - `user: agent`
   - Volumes:
     - `${HOME}/Repositories:/home/agent/Repositories` (rw)
-    - `${HOME}/.claude/.credentials.json:/tmp/host-credentials.json:ro` (entrypoint copies out)
+    - `./.claude:/home/agent/.claude` (rw, repo-local, gitignored)
+    - `./.claude.json:/home/agent/.claude.json` (rw, repo-local, gitignored)
     - `${HOME}/.gitconfig:/home/agent/.gitconfig:ro`
     - `${HOME}/.config/gh:/home/agent/.config/gh:rw`
     - `${HOME}/.config/tea:/home/agent/.config/tea:rw`
@@ -103,7 +104,7 @@ Agent's MCP config points at `http://playwright-mcp:<port>/sse` (port confirmed 
 ## Host wrapper script (`bin/agent-sandbox`)
 
 Bash script that:
-1. Verifies host prerequisites (agent user exists, ACLs set on `~/Repositories`, `SSH_AUTH_SOCK` set, credentials file exists)
+1. Verifies host prerequisites (agent user exists, ACLs set on `~/Repositories`, `SSH_AUTH_SOCK` set, repo-local `./.claude/` + `./.claude.json` initialised)
 2. Exports vars compose.yml expects
 3. Runs `docker compose -f /path/to/compose.yml run --rm agent "$@"`
 
@@ -118,21 +119,24 @@ Argument-less invocation = interactive shell. With args = exec command.
   sudo setfacl -R -m u:agent:rwX ~/Repositories
   sudo setfacl -R -d -m u:agent:rwX ~/Repositories
   ```
-- ACL on credentials + configs so agent UID can read:
+- ACL on configs so agent UID can read:
   ```
-  setfacl -m u:agent:r ~/.claude/.credentials.json
   setfacl -m u:agent:r ~/.gitconfig
   setfacl -R -m u:agent:rwX ~/.config/gh ~/.config/tea
+  ```
+- Repo-local container Claude state (no host ACL needed; created agent-owned by `./bin/agent-sandbox setup`):
+  ```
+  install -d -o agent -g agent -m 0700 ./.claude
+  install -o agent -g agent -m 0600 /dev/null ./.claude.json
   ```
 - Document `id -u agent` → pass as `AGENT_UID` build arg
 
 ## Entrypoint script (`docker/entrypoint.sh`)
 
-- If `/tmp/host-credentials.json` exists and `~/.claude/.credentials.json` does not (or differs), copy host → agent home. Token refresh now writes to writable agent-owned file.
 - Set `FNM_DIR`, source fnm init
 - `exec "$@"` (defaults to bash)
 
-Note: token refreshes won't propagate back to host. Acceptable for this design — host periodically re-logs in if needed, or wrapper script re-copies fresh credentials each start.
+Note: container's Claude session is fully independent of the host's. Refreshes and `/login` events on either side do not propagate. Each clone/worktree has its own container session persisted in `./.claude/`.
 
 ## CLAUDE.md content (project-level, NOT bundled into image)
 
@@ -144,7 +148,7 @@ Sections to include:
   - `./bin/agent-sandbox` to run
   - `docker compose run --rm agent claude` to launch Claude directly
 - **Architecture notes**: two-container compose (agent + playwright-mcp sidecar), why sidecar over baked-in
-- **Host coupling points** (so future edits don't break them): UID build arg, ACLs, bind mount paths, credentials file copy
+- **Host coupling points** (so future edits don't break them): UID build arg, ACLs, bind mount paths, repo-local Claude state dir
 - **Skills are baked, pinned** — bumping requires Dockerfile change + rebuild
 - **Caveman/worktrunk source repos** with pinned commits
 - Avoid generic dev advice per init instructions
