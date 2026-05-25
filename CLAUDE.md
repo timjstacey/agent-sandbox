@@ -32,14 +32,14 @@ Do not re-litigate these without explicit user direction:
 ## Repository topology
 
 - This repo lives at `~/Repositories/agent-sandbox` on the maintainer's host as a **bare** repository (`.git/` inside a wrapper dir). There is no working tree at the bare-repo root — never edit there.
-- Remote: `gitea@git.sillysamoyed.com:tim/agent-sandbox.git` (self-hosted Gitea).
+- Remote: `git@github.com:timjstacey/agent-sandbox.git` (GitHub). The plan originally targeted self-hosted Gitea; the live remote is GitHub.
 - Worktrees are managed by [worktrunk](https://github.com/max-sixty/worktrunk). Create one with `wt switch <branch>` (or `wt switch -c <new-branch>`) before editing.
 - Default worktree path for this repo is `~/Repositories/agent-sandbox/.git.<branch>` — not a typo, that's how `wt` names worktrees of a bare repo without a per-project `worktree-path` template.
 
 ## Workflow conventions
 
 - **One feature per branch / worktree.** Branch naming: `feat/<topic>`, `fix/<topic>`, `docs/<topic>`.
-- **Issues drive work.** Each scoped task is a Gitea issue against `tim/agent-sandbox` (created via `tea issue create`). When implementing, open a PR with `tea pr create` and reference the issue.
+- **Issues drive work.** Each scoped task is a GitHub issue against `timjstacey/agent-sandbox` (created via `gh issue create`). When implementing, open a PR with `gh pr create` and reference the issue.
 - **Scope discipline.** Don't expand beyond what the issue asks. Cross-file refactors require their own issue.
 - **Commit messages.** Conventional Commits style; the worktrunk LLM commit generator is configured globally.
 
