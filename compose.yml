@@ -4,11 +4,11 @@
 #   - playwright-mcp: Microsoft Playwright MCP sidecar (no host port exposure)
 #
 # Usage:
-#   export AGENT_UID=$(id -u agent) AGENT_GID=$(id -g agent)
-#   docker compose build agent
-#   docker compose up -d                   # start playwright-mcp sidecar in background
-#   docker compose run --rm agent          # interactive bash
-#   docker compose run --rm agent claude   # launch Claude Code directly
+#   ./bin/agent-sandbox setup             # one-time host ACL setup
+#   ./bin/agent-sandbox build             # build agent image
+#   docker compose up -d playwright-mcp   # start playwright-mcp sidecar in background
+#   ./bin/agent-sandbox                   # interactive bash
+#   ./bin/agent-sandbox claude            # launch Claude Code directly
 
 services:
 
@@ -23,8 +23,18 @@ services:
     volumes:
       # Host repositories — mirrored path so copy/paste paths work identically
       - ${HOME}/Repositories:/home/agent/Repositories
-      # Claude credentials: read-only mount; entrypoint copies to writable home
-      - ${HOME}/.claude/.credentials.json:/tmp/host-credentials.json:ro
+      # Claude config — host directory mounted directly so auth persists and
+      # token refreshes propagate back to the host automatically.
+      - ${HOME}/.claude:/home/agent/.claude
+      # Claude account/session state (oauthAccount, userID, onboarding flags).
+      # Mounted rw so a single login on the host carries into the container and
+      # vice versa. Container-only MCP servers are injected via --mcp-config
+      # (see /etc/claude/mcp-config.json + claude shim) so this file stays clean.
+      - ${HOME}/.claude.json:/home/agent/.claude.json
+      # Container-specific settings overlay (caveman hook, MCP config).
+      # Mounted on top of the directory above so the host's settings.json
+      # is not affected but the container always uses these settings.
+      - ./docker/settings.json:/home/agent/.claude/settings.json:ro
       # Git identity
       - ${HOME}/.gitconfig:/home/agent/.gitconfig:ro
       # GitHub CLI config (read-write so auth tokens can refresh)
