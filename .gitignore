@@ -1,0 +1,3 @@
+# Container-local Claude state (per-clone session, separate from host login)
+/.claude/
+/.claude.json

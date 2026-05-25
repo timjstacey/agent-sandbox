@@ -23,14 +23,13 @@ services:
     volumes:
       # Host repositories — mirrored path so copy/paste paths work identically
       - ${HOME}/Repositories:/home/agent/Repositories
-      # Claude config — host directory mounted directly so auth persists and
-      # token refreshes propagate back to the host automatically.
-      - ${HOME}/.claude:/home/agent/.claude
-      # Claude account/session state (oauthAccount, userID, onboarding flags).
-      # Mounted rw so a single login on the host carries into the container and
-      # vice versa. Container-only MCP servers are injected via --mcp-config
-      # (see /etc/claude/mcp-config.json + claude shim) so this file stays clean.
-      - ${HOME}/.claude.json:/home/agent/.claude.json
+      # Claude state — container-local, separate from host session.
+      # Kept inside the repo (gitignored) so each clone/worktree gets its own
+      # container login. Avoids ACL drift from host claude rewriting its files
+      # atomically (which strips agent's ACL entry). First container run will
+      # prompt /login; credentials persist in ./.claude/.credentials.json.
+      - ./.claude:/home/agent/.claude
+      - ./.claude.json:/home/agent/.claude.json
       # Container-specific settings overlay (caveman hook, MCP config).
       # Mounted on top of the directory above so the host's settings.json
       # is not affected but the container always uses these settings.
