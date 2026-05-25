@@ -1,0 +1,53 @@
+# Docker Compose stack for agent-sandbox.
+# Two services on a shared internal bridge network:
+#   - agent:          built from ./Dockerfile; interactive Claude Code session
+#   - playwright-mcp: Microsoft Playwright MCP sidecar (no host port exposure)
+#
+# Usage:
+#   export AGENT_UID=$(id -u agent) AGENT_GID=$(id -g agent)
+#   docker compose build agent
+#   docker compose up -d                   # start playwright-mcp sidecar in background
+#   docker compose run --rm agent          # interactive bash
+#   docker compose run --rm agent claude   # launch Claude Code directly
+
+services:
+
+  agent:
+    build:
+      context: .
+      args:
+        AGENT_UID: "${AGENT_UID:-1500}"
+        AGENT_GID: "${AGENT_GID:-1500}"
+    tty: true
+    stdin_open: true
+    depends_on:
+      - playwright-mcp
+    volumes:
+      # Host repositories — mirrored path so copy/paste paths work identically
+      - ${HOME}/Repositories:/home/agent/Repositories
+      # Claude credentials: read-only mount; entrypoint copies to writable home
+      - ${HOME}/.claude/.credentials.json:/tmp/host-credentials.json:ro
+      # Git identity
+      - ${HOME}/.gitconfig:/home/agent/.gitconfig:ro
+      # GitHub CLI config (read-write so auth tokens can refresh)
+      - ${HOME}/.config/gh:/home/agent/.config/gh
+      # Gitea tea CLI config (read-write so auth tokens can refresh)
+      - ${HOME}/.config/tea:/home/agent/.config/tea
+      # SSH agent socket forwarding — container never holds private keys
+      - ${SSH_AUTH_SOCK}:/ssh-agent
+    environment:
+      SSH_AUTH_SOCK: /ssh-agent
+    networks:
+      - internal
+
+  playwright-mcp:
+    # TODO: pin to a specific digest or immutable tag before production use.
+    # e.g. mcr.microsoft.com/playwright/mcp@sha256:<digest>
+    image: mcr.microsoft.com/playwright/mcp:latest
+    # No ports exposed to host — agent reaches it over the internal bridge network
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
