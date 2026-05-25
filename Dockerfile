@@ -59,6 +59,9 @@ USER agent
 WORKDIR /home/agent
 
 ENV SHELL=/bin/bash
+# Default terminal type — claude (and most TUIs) refuse to draw without one,
+# and `docker compose run` does not forward host TERM by default.
+ENV TERM=xterm-256color
 SHELL ["/bin/bash", "-c"]
 
 # ─── Layer 5: fnm (Fast Node Manager) ────────────────────────────────────────
