@@ -97,7 +97,22 @@ RUN eval "$(fnm env --use-on-cd --shell bash)" \
     && npm install -g typescript @anthropic-ai/claude-code \
     && tsc -v && claude --version
 
-# ─── TODO: Skills baking (caveman + worktrunk) — see issue #8 ────────────────
+# ─── Layer 11: Clone skills (caveman + worktrunk) ────────────────────────────
+# caveman  pinned @ ef6050c (2026-05-25)
+# worktrunk pinned @ 58168f4 (2026-05-25)
+USER root
+RUN git clone https://github.com/JuliusBrussee/caveman.git /opt/skills/caveman \
+    && git -C /opt/skills/caveman checkout ef6050c \
+    && git clone https://github.com/max-sixty/worktrunk.git /opt/skills/worktrunk \
+    && git -C /opt/skills/worktrunk checkout 58168f4
+
+USER agent
+RUN mkdir -p /home/agent/.claude/plugins/marketplaces \
+    && ln -s /opt/skills/caveman  /home/agent/.claude/plugins/marketplaces/caveman \
+    && ln -s /opt/skills/worktrunk /home/agent/.claude/plugins/marketplaces/worktrunk
+
+# ─── Layer 12: Bake settings.json (caveman auto-activation + plugins) ─────────
+COPY --chown=agent:agent docker/settings.json /home/agent/.claude/settings.json
 
 # ─── Final configuration ─────────────────────────────────────────────────────
 WORKDIR /home/agent/Repositories
