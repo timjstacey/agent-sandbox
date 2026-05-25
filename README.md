@@ -1,15 +1,14 @@
 # agent-sandbox
 
-A Dockerized Claude Code sandbox. Runs Claude Code and supporting dev tooling in an isolated container against your host repositories. The container holds the agent user; your host repos are bind-mounted at runtime. Claude Code gets full control over the mounted code while your host system stays protected — the AI agent never touches anything outside the mounts. The container has its own Claude Code login (persisted in a repo-local, gitignored directory), independent of your host's.
+A Dockerized Claude Code sandbox. Runs Claude Code and supporting dev tooling in an isolated container against your host repositories. The in-container `agent` user is built with your host UID/GID so files written to bind mounts land owned by you (no `sudo` to edit). Your host repos are bind-mounted at runtime; Claude Code gets full control over the mounted code while host paths outside the mounts remain unreachable from inside the container. The container has its own Claude Code login (persisted in a repo-local, gitignored directory), independent of your host's.
 
 ## Prerequisites
 
 - Docker with the Compose plugin (`docker compose version` should work)
-- A dedicated `agent` user created on the host
-- POSIX ACLs configured on `~/Repositories` and relevant config files so the container's `agent` UID can read/write them
 - SSH agent running on the host (`$SSH_AUTH_SOCK` set)
+- `gh` and `tea` authenticated on the host (`gh auth login`, `tea login`) — their config dirs are bind-mounted into the container
 
-See [docs/host-setup.md](docs/host-setup.md) for the full one-time setup walkthrough.
+See [docs/host-setup.md](docs/host-setup.md) for the full one-time setup walkthrough, including the security trade-off of UID-matching.
 
 ## Quickstart
 
@@ -17,10 +16,10 @@ See [docs/host-setup.md](docs/host-setup.md) for the full one-time setup walkthr
 git clone git@github.com:timjstacey/agent-sandbox.git
 cd agent-sandbox
 
-# One-time host setup (ACLs + repo-local container Claude state)
+# One-time setup (initialise repo-local container Claude state)
 ./bin/agent-sandbox setup
 
-# Build — wrapper passes the host agent user's UID/GID automatically
+# Build — wrapper passes the host invoker's UID/GID so files land owned by you
 ./bin/agent-sandbox build
 
 # Run an interactive shell inside the container
@@ -47,6 +46,6 @@ cd agent-sandbox
 
 ## Learn more
 
-- [docs/host-setup.md](docs/host-setup.md) — one-time host preparation (agent user, ACLs, SSH agent)
+- [docs/host-setup.md](docs/host-setup.md) — one-time host preparation (UID matching, SSH agent, security trade-off)
 - [docs/plan.md](docs/plan.md) — architecture decisions and design context
 - [CLAUDE.md](CLAUDE.md) — contributor guidance for Claude Code sessions working on this project

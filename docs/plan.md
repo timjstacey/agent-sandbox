@@ -7,7 +7,7 @@ User wants a reproducible, isolated environment to run Claude Code (and supporti
 Goals:
 - Lean image (no full-OS bloat)
 - Reuse user's existing Claude Pro subscription (no API key billing)
-- Strong host isolation via dedicated `agent` user + namespaced container
+- Host isolation via Docker namespacing + narrow bind mounts (originally also via a dedicated host `agent` user — superseded by UID match; see decisions table)
 - Reproducible, hermetic builds
 - Smooth UX: one wrapper script to run
 
@@ -20,7 +20,7 @@ Goals:
 | Claude Code auth | Container-local: bind-mount repo-relative `./.claude/` and `./.claude.json` (gitignored). Separate session from host login (first run does `/login` once and persists). Earlier designs shared host `~/.claude*` directly; abandoned because host claude rewrites those files atomically and strips the agent's POSIX ACL |
 | Skills delivery | Baked at build via `git clone` (pinned commits); caveman skill auto-activated at session start to reduce token usage |
 | `tea` CLI | Gitea `tea` (https://gitea.com/gitea/tea) |
-| Container user | Non-root `agent`, UID/GID via `--build-arg` matching host `agent` user |
+| Container user | Non-root `agent` inside the image, UID/GID via `--build-arg` matching the **host invoker** (`id -u`/`id -g`). No separate host `agent` account, no POSIX ACLs. (Superseded the earlier dedicated-host-user + ACL scheme — see § "Host one-time setup" amendment below) |
 | Bind mount layout | Mirror host paths (`-v ~/Repositories:/home/agent/Repositories`) |
 | Git push creds | Forward host SSH agent socket (`$SSH_AUTH_SOCK`) |
 | Node | fnm baked in, default = latest LTS (Node 22 at time of writing) |
@@ -112,24 +112,20 @@ Argument-less invocation = interactive shell. With args = exec command.
 
 ## Host one-time setup (`docs/host-setup.md`)
 
-- Create `agent` user: `sudo useradd -r -m -s /usr/sbin/nologin agent` (or with shell if user wants to su into it)
-- Lock: `sudo usermod -L agent`
-- ACL on repos dir:
-  ```
-  sudo setfacl -R -m u:agent:rwX ~/Repositories
-  sudo setfacl -R -d -m u:agent:rwX ~/Repositories
-  ```
-- ACL on configs so agent UID can read:
-  ```
-  setfacl -m u:agent:r ~/.gitconfig
-  setfacl -R -m u:agent:rwX ~/.config/gh ~/.config/tea
-  ```
-- Repo-local container Claude state (no host ACL needed; created agent-owned by `./bin/agent-sandbox setup`):
-  ```
-  install -d -o agent -g agent -m 0700 ./.claude
-  install -o agent -g agent -m 0600 /dev/null ./.claude.json
-  ```
-- Document `id -u agent` → pass as `AGENT_UID` build arg
+**Amended — current scheme (UID match, no host `agent` user):**
+
+- No dedicated host user. The in-image `agent` is created with UID/GID matching the host invoker, so bind-mounted files appear owned by the host user.
+- `bin/agent-sandbox build` automatically passes `--build-arg AGENT_UID=$(id -u) AGENT_GID=$(id -g)`.
+- `bin/agent-sandbox setup` initialises the repo-local container Claude state (`./.claude/` + `./.claude.json`) as the host user. No `sudo`, no ACLs.
+- See `docs/host-setup.md` § 5 for the security trade-off (loss of UID-based home isolation; mitigations: narrow bind mounts, optional `userns-remap`).
+
+**Historical (superseded) — original scheme used a dedicated host `agent` user plus POSIX ACLs:**
+
+- Create `agent` user: `sudo useradd -r -m -s /usr/sbin/nologin agent`; lock with `sudo usermod -L agent`
+- `setfacl -R -m u:agent:rwX ~/Repositories` (and default ACL); `setfacl -m u:agent:r ~/.gitconfig`; ACLs on `~/.config/gh`, `~/.config/tea`
+- Pass `id -u agent`/`id -g agent` as build args
+
+The ACL scheme worked but added constant `sudo`-to-edit friction (files in `~/Repositories` were owned by `agent:agent`) and suffered ACL drift whenever host tools rewrote files atomically. UID match trades the privilege barrier between container UID and host home for ergonomics; documented as a deliberate trade-off, not a regression.
 
 ## Entrypoint script (`docker/entrypoint.sh`)
 
