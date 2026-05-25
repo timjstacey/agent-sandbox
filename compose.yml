@@ -18,8 +18,6 @@ services:
       args:
         AGENT_UID: "${AGENT_UID:-1500}"
         AGENT_GID: "${AGENT_GID:-1500}"
-    tty: true
-    stdin_open: true
     depends_on:
       - playwright-mcp
     volumes:
@@ -44,7 +42,10 @@ services:
     # TODO: pin to a specific digest or immutable tag before production use.
     # e.g. mcr.microsoft.com/playwright/mcp@sha256:<digest>
     image: mcr.microsoft.com/playwright/mcp:latest
-    # No ports exposed to host — agent reaches it over the internal bridge network
+    # Image entrypoint defaults to stdio. Override to bind SSE on the internal
+    # network so the agent service can reach it at http://playwright-mcp:8931/sse.
+    command: ["--headless", "--browser", "chromium", "--no-sandbox", "--host", "0.0.0.0", "--port", "8931"]
+    # No host port mapping — only reachable on the internal bridge network.
     networks:
       - internal
 

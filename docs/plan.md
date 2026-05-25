@@ -51,7 +51,7 @@ agent-sandbox/
 │   └── motd                        # First-run shell banner (optional)
 └── .github/
     └── workflows/
-        └── build.yml               # CI: build + push image on tag/main (or Gitea Actions equivalent)
+        └── build.yml               # CI: build + push image on tag/main (GitHub Actions)
 ```
 
 ## Dockerfile outline
@@ -178,7 +178,7 @@ Recommendation when ready to decide: **GHCR** for simplicity unless self-hosting
 ## Repository topology
 
 - `/home/tim/Repositories/agent-sandbox` is a **bare** repository (no working tree).
-- Remote `origin` = `gitea@git.sillysamoyed.com:tim/agent-sandbox.git` (self-hosted Gitea).
+- Remote `origin` = `git@github.com:timjstacey/agent-sandbox.git` (GitHub). Plan originally targeted self-hosted Gitea; live remote is GitHub.
 - Work happens in worktrees managed by `wt` (worktrunk). Never edit inside the bare repo dir directly.
 - A stray `CLAUDE.md` currently sits in the bare-repo root (untracked, created by `/init` before the bare nature was known). Delete it as part of cleanup.
 
@@ -189,13 +189,13 @@ Recommendation when ready to decide: **GHCR** for simplicity unless self-hosting
 1. `wt switch main` to materialize a worktree for `main`.
 2. Delete stray `CLAUDE.md` from the bare-repo root: `rm /home/tim/Repositories/agent-sandbox/CLAUDE.md`.
 3. Inside the worktree, write a proper `CLAUDE.md` (see "CLAUDE.md content" section) reflecting the full plan.
-4. Copy this plan file into the repo as `docs/plan.md` (rename from `fancy-orbiting-dove.md` to something meaningful) so it lives with the codebase and Phase-B issues can link to it on Gitea.
+4. Copy this plan file into the repo as `docs/plan.md` (rename from `fancy-orbiting-dove.md` to something meaningful) so it lives with the codebase and Phase-B issues can link to it on GitHub.
 5. Commit on `main` in one commit: `feat: bootstrap project guidance and implementation plan` — includes `CLAUDE.md` + `docs/plan.md`.
 6. Push: `git push origin main`.
 
-### Phase B — Issue split (Gitea, via `tea`)
+### Phase B — Issue split (GitHub, via `gh`)
 
-Split the remaining work into small, independently-implementable Gitea issues so Claude Sonnet 4.6 can pick one off at a time and work in parallel worktrees. Each issue references this plan file and names the exact files to create. Suggested issues:
+Split the remaining work into small, independently-implementable GitHub issues so Claude Sonnet 4.6 can pick one off at a time and work in parallel worktrees. Each issue references this plan file and names the exact files to create. Suggested issues:
 
 | # | Title | Scope |
 |---|---|---|
@@ -207,7 +207,7 @@ Split the remaining work into small, independently-implementable Gitea issues so
 | 6 | Add `docs/host-setup.md` | ACLs, agent user creation, one-time host prep |
 | 7 | Add `README.md` quickstart | Public-facing setup + run docs |
 | 8 | Bake caveman + worktrunk skills into image | Dockerfile clone steps + SessionStart hook for caveman auto-activation |
-| 9 | Add `.github/workflows/build.yml` (or Gitea Actions equivalent) | CI build + push; registry TBD — block on registry decision |
+| 9 | Add `.github/workflows/build.yml` | CI build + push; registry TBD — block on registry decision |
 
 Each issue body includes:
 - Link to `fancy-orbiting-dove.md` plan (paste relevant section)
@@ -215,11 +215,11 @@ Each issue body includes:
 - Files to create/modify
 - Branch naming convention (e.g., `feat/dockerfile`, `feat/compose`)
 
-Create via `tea issue create --title "..." --body "$(cat <<'EOF' ... EOF)"` against `tim/agent-sandbox`.
+Create via `gh issue create --title "..." --body "$(cat <<'EOF' ... EOF)"` against `timjstacey/agent-sandbox`.
 
 ### Phase C — Implement issues
 
-For each issue, in a fresh worktree (`wt switch feat/<topic>`), Claude 4.6 implements, opens PR via `tea pr create`, merges, removes worktree.
+For each issue, in a fresh worktree (`wt switch feat/<topic>`), Claude 4.6 implements, opens PR via `gh pr create`, merges, removes worktree.
 
 ### Phase D — Verification
 
