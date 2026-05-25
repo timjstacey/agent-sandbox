@@ -30,10 +30,13 @@ RUN mkdir -p /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 # ─── Layer 3: Gitea tea CLI (static binary) ──────────────────────────────────
-RUN curl -fsSL \
-    "https://gitea.com/gitea/tea/releases/download/v0.14.1/tea-linux-amd64" \
-    -o /usr/local/bin/tea \
-    && chmod +x /usr/local/bin/tea
+ARG TEA_VERSION=0.14.1
+RUN arch="$(dpkg --print-architecture)" \
+    && curl -fsSL \
+       "https://gitea.com/gitea/tea/releases/download/v${TEA_VERSION}/tea-${TEA_VERSION}-linux-${arch}" \
+       -o /usr/local/bin/tea \
+    && chmod +x /usr/local/bin/tea \
+    && tea --version
 
 # ─── Layer 4: agent user ─────────────────────────────────────────────────────
 RUN groupadd --gid "${AGENT_GID}" agent \
@@ -115,6 +118,10 @@ USER agent
 
 # ─── Layer 11: Bake settings.json (caveman auto-activation + plugins) ─────────
 COPY --chown=agent:agent docker/settings.json /home/agent/.claude/settings.json
+
+# ─── Layer 12: Bake MCP server config (Playwright sidecar) ───────────────────
+# Claude Code reads user-scoped MCP servers from ~/.claude.json.
+COPY --chown=agent:agent docker/mcp-config.json /home/agent/.claude.json
 
 # ─── Final configuration ─────────────────────────────────────────────────────
 WORKDIR /home/agent/Repositories

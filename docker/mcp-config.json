@@ -2,7 +2,7 @@
   "mcpServers": {
     "playwright": {
       "type": "sse",
-      "url": "http://playwright-mcp:3000/sse"
+      "url": "http://playwright-mcp:8931/sse"
     }
   }
 }

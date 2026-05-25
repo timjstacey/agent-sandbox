@@ -21,7 +21,16 @@ if ! test -S "${SSH_AUTH_SOCK:-}"; then
   exit 1
 fi
 
-# 4. Warn (don't exit) if ACLs for 'agent' are missing on ~/Repositories
+# 4. Verify gh and tea config directories exist on host.
+# Compose would otherwise create them as root-owned mounts, causing permission errors.
+for cfg in "${HOME}/.config/gh" "${HOME}/.config/tea"; do
+  if ! test -d "${cfg}"; then
+    echo "Error: ${cfg} not found. Run 'gh auth login' / 'tea login' first. See docs/host-setup.md" >&2
+    exit 1
+  fi
+done
+
+# 5. Warn (don't exit) if ACLs for 'agent' are missing on ~/Repositories
 if ! getfacl "${HOME}/Repositories" 2>/dev/null | grep -q "^user:agent:"; then
   echo "Warning: ACLs for 'agent' not found on ~/Repositories. See docs/host-setup.md" >&2
 fi
