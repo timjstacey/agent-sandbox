@@ -14,7 +14,7 @@ See [docs/host-setup.md](docs/host-setup.md) for the full one-time setup walkthr
 ## Quickstart
 
 ```bash
-git clone gitea@git.sillysamoyed.com:tim/agent-sandbox.git
+git clone git@github.com:timjstacey/agent-sandbox.git
 cd agent-sandbox
 
 # Build — UID/GID must match the host agent user
