@@ -115,8 +115,16 @@ RUN CLAUDE_BIN="$(command -v claude)" \
        'exec "$(dirname "$(readlink -f "$0")")/claude.real" --mcp-config /etc/claude/mcp-config.json "$@"' \
        > "${CLAUDE_BIN}" \
     && chmod +x "${CLAUDE_BIN}" \
-    && chown agent:agent "${CLAUDE_BIN}" "${CLAUDE_BIN}.real"
+    && chown agent:agent "${CLAUDE_BIN}" "${CLAUDE_BIN}.real" \
+    && install -d -o agent -g agent /home/agent/.local/bin \
+    && ln -s "${CLAUDE_BIN}" /home/agent/.local/bin/claude
 USER agent
+
+# Host ~/.claude.json (bind-mounted) records installMethod=native and expects
+# the binary at ~/.local/bin/claude. Prepend that dir to PATH so the symlink
+# above resolves first; the shim's readlink -f then jumps to claude.real in
+# the fnm bin dir, finding claude.real alongside it.
+ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # ─── Layer 10: Clone skills + symlinks (caveman + worktrunk) ─────────────────
 # caveman  pinned @ ef6050c (2026-05-25)
