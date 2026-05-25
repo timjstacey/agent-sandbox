@@ -2,8 +2,11 @@
 FROM debian:trixie-slim
 
 # ─── Build args ──────────────────────────────────────────────────────────────
-ARG AGENT_UID=1500
-ARG AGENT_GID=1500
+# Default to the conventional first-user UID/GID on Linux desktops. The wrapper
+# script (bin/agent-sandbox build) overrides these with `id -u` / `id -g` of
+# the invoking host user so that bind-mounted files land owned by that user.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
 
 # ─── Layer 1: System packages ────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -41,14 +44,21 @@ RUN arch="$(dpkg --print-architecture)" \
     && tea --version
 
 # ─── Layer 4: agent user ─────────────────────────────────────────────────────
-RUN groupadd --gid "${AGENT_GID}" agent \
-    && useradd --uid "${AGENT_UID}" --gid "${AGENT_GID}" \
-               --create-home --home-dir /home/agent \
-               --shell /bin/bash \
-               --no-log-init \
-               agent \
+# UID/GID match the host invoker so bind-mounted files appear owned by them on
+# the host (no sudo needed to edit). Defensive: reuse any pre-existing group/
+# user that already occupies the target UID/GID rather than failing the build.
+RUN if ! getent group "${AGENT_GID}" >/dev/null; then \
+        groupadd --gid "${AGENT_GID}" agent; \
+    fi \
+    && if ! getent passwd "${AGENT_UID}" >/dev/null; then \
+        useradd --uid "${AGENT_UID}" --gid "${AGENT_GID}" \
+                --create-home --home-dir /home/agent \
+                --shell /bin/bash \
+                --no-log-init \
+                agent; \
+    fi \
     && mkdir -p /home/agent/Repositories \
-    && chown -R agent:agent /home/agent
+    && chown -R "${AGENT_UID}:${AGENT_GID}" /home/agent
 
 # ─── Copy entrypoint (as root, before USER switch) ───────────────────────────
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint

@@ -6,48 +6,30 @@ SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 REPO_DIR="$(readlink -f "${SCRIPT_DIR}/..")"
 COMPOSE_FILE="${REPO_DIR}/compose.yml"
 
-# --- agent user must exist for all subcommands ---
-if ! id agent >/dev/null 2>&1; then
-  echo "Error: 'agent' user not found on host. See docs/host-setup.md" >&2
-  exit 1
-fi
-
 # --- Dispatch ---
 case "${1:-}" in
 
   setup)
-    echo "Granting agent user ACL access to required host paths..."
-
-    sudo setfacl -m u:agent:x "${HOME}"
+    echo "Initialising container-local Claude state..."
 
     # Container claude state lives inside the repo (gitignored) so each clone
-    # has its own session. Pre-create so docker bind-mounts the right kind.
-    install -d -o "$(id -u agent)" -g "$(id -g agent)" -m 0700 "${REPO_DIR}/.claude" \
-      2>/dev/null \
-      || sudo install -d -o "$(id -u agent)" -g "$(id -g agent)" -m 0700 "${REPO_DIR}/.claude"
+    # has its own session. Pre-create as the host user so docker bind-mounts
+    # the right kind of inode and ownership matches the in-container UID.
+    install -d -m 0700 "${REPO_DIR}/.claude"
     if [[ ! -f "${REPO_DIR}/.claude.json" ]]; then
-      sudo -u agent touch "${REPO_DIR}/.claude.json" 2>/dev/null \
-        || { touch "${REPO_DIR}/.claude.json" && sudo chown "$(id -u agent):$(id -g agent)" "${REPO_DIR}/.claude.json"; }
-      sudo chmod 0600 "${REPO_DIR}/.claude.json"
+      touch "${REPO_DIR}/.claude.json"
+      chmod 0600 "${REPO_DIR}/.claude.json"
     fi
-
-    if [[ -f "${HOME}/.gitconfig" ]]; then
-      sudo setfacl -m u:agent:r "${HOME}/.gitconfig"
-    else
-      echo "Warning: ~/.gitconfig not found — skipping." >&2
-    fi
-
-    sudo setfacl -R -m u:agent:rwX "${HOME}/Repositories"
-    sudo setfacl -R -d -m u:agent:rwX "${HOME}/Repositories"
 
     for cfg in "${HOME}/.config/gh" "${HOME}/.config/tea"; do
-      if [[ -d "${cfg}" ]]; then
-        sudo setfacl -R -m u:agent:rwX "${cfg}"
-        sudo setfacl -R -d -m u:agent:rwX "${cfg}"
-      else
-        echo "Warning: ${cfg} not found — skipping. Re-run after 'gh auth login' / 'tea login'." >&2
+      if [[ ! -d "${cfg}" ]]; then
+        echo "Warning: ${cfg} not found. Run 'gh auth login' / 'tea login' before launching the container." >&2
       fi
     done
+
+    if [[ ! -f "${HOME}/.gitconfig" ]]; then
+      echo "Warning: ~/.gitconfig not found — container will lack git identity until you create one." >&2
+    fi
 
     echo "Done. Run './bin/agent-sandbox verify' to confirm."
     ;;
@@ -55,38 +37,39 @@ case "${1:-}" in
   verify)
     ok=true
 
-    sudo -u agent test -d "${REPO_DIR}/.claude" \
+    test -d "${REPO_DIR}/.claude" \
       && echo "claude dir:   OK" \
       || { echo "claude dir:   FAIL (run setup)"; ok=false; }
 
-    sudo -u agent test -w "${REPO_DIR}/.claude.json" \
+    test -w "${REPO_DIR}/.claude.json" \
       && echo "session:      OK" \
       || { echo "session:      FAIL (run setup)"; ok=false; }
 
-    sudo -u agent test -r "${HOME}/.gitconfig" \
+    test -r "${HOME}/.gitconfig" \
       && echo "gitconfig:    OK" \
-      || { echo "gitconfig:    FAIL"; ok=false; }
+      || { echo "gitconfig:    FAIL (create ~/.gitconfig)"; ok=false; }
 
-    sudo -u agent touch "${HOME}/Repositories/.agent-write-test" \
-      && rm "${HOME}/Repositories/.agent-write-test" \
+    test -w "${HOME}/Repositories" \
       && echo "repos write:  OK" \
       || { echo "repos write:  FAIL"; ok=false; }
 
-    sudo -u agent sh -c "touch ${HOME}/.config/gh/.agent-write-test && rm ${HOME}/.config/gh/.agent-write-test" \
+    test -w "${HOME}/.config/gh" \
       && echo "gh write:     OK" \
-      || { echo "gh write:     FAIL"; ok=false; }
+      || { echo "gh write:     FAIL (run 'gh auth login')"; ok=false; }
 
-    sudo -u agent sh -c "touch ${HOME}/.config/tea/.agent-write-test && rm ${HOME}/.config/tea/.agent-write-test" \
+    test -w "${HOME}/.config/tea" \
       && echo "tea write:    OK" \
-      || { echo "tea write:    FAIL"; ok=false; }
+      || { echo "tea write:    FAIL (run 'tea login')"; ok=false; }
 
     ${ok} && exit 0 || exit 1
     ;;
 
   build)
+    # Match the in-container UID/GID to the host user so bind-mounted files
+    # are owned by the host user (no sudo to edit, no ACLs needed).
     exec docker compose -f "${COMPOSE_FILE}" build \
-      --build-arg AGENT_UID="$(id -u agent)" \
-      --build-arg AGENT_GID="$(id -g agent)" \
+      --build-arg AGENT_UID="$(id -u)" \
+      --build-arg AGENT_GID="$(id -g)" \
       agent
     ;;
 
@@ -110,10 +93,6 @@ case "${1:-}" in
         exit 1
       fi
     done
-
-    if ! getfacl "${HOME}/Repositories" 2>/dev/null | grep -q "^user:agent:"; then
-      echo "Warning: ACLs for 'agent' not found on ~/Repositories. Run './bin/agent-sandbox setup'." >&2
-    fi
 
     exec docker compose -f "${COMPOSE_FILE}" run --rm agent "$@"
     ;;

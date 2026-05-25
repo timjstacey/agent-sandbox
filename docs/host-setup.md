@@ -4,99 +4,64 @@ One-time preparation steps to run the agent container on your machine. Follow th
 
 ---
 
-## 1. Create a dedicated `agent` user
+## 1. UID matching, not a separate host user
 
-The container runs as a non-root user called `agent`. This user must exist on the host so that bind-mounted directories carry the right ownership inside the container.
+The container's in-image user is called `agent`, but its UID/GID are set at build time to match the host user that builds the image. This means:
 
-Steps 1 and 2 require root. If your terminal has `no_new_privs` set (common when the terminal emulator runs as a Flatpak), `sudo <command>` will fail. Switch to a root shell first, then run the commands:
+- Files written by the container appear on the host owned by **you**, not by a separate `agent` account — no `sudo` needed to edit or delete them.
+- The wrapper script (`bin/agent-sandbox build`) automatically passes `--build-arg AGENT_UID=$(id -u) AGENT_GID=$(id -g)`.
+- No separate host user, no POSIX ACLs to manage, no group memberships to add.
 
-```bash
-sudo su
-```
-
-Once at a root prompt, create the user. On Arch-based distros (CachyOS, Manjaro, etc.) use `/usr/bin/nologin`; on Debian/Ubuntu use `/usr/sbin/nologin`:
-
-```bash
-# Arch-based
-useradd -r -m -s /usr/bin/nologin agent
-usermod -L agent
-exit
-
-# Debian/Ubuntu
-useradd -r -m -s /usr/sbin/nologin agent
-usermod -L agent
-exit
-```
-
-What these flags do:
-
-- `-r` — creates a *system* user (UID below the normal user range).
-- `-m` — creates a home directory (`/home/agent` or `/var/lib/agent` depending on distro defaults). The container's entrypoint uses this as writable scratch space.
-- `-s /usr/sbin/nologin` — prevents interactive login; the account exists only for process ownership.
-- `usermod -L` — locks the password, so the account cannot be used with a password even by mistake. It is only accessible from root or from within a container that already runs as this UID.
+Earlier versions of this project required a dedicated host `agent` user plus POSIX ACLs on every shared path. That added a privilege barrier between the container UID and your home directory, but at the cost of constant `sudo`-to-edit friction and ACL drift whenever host tools rewrote files atomically. The UID-match approach trades that barrier for ergonomics; see *Security trade-off* below.
 
 ---
 
 ## 2. Build the image
 
-The image must be built with the same numeric UID/GID as the `agent` user on your host. The wrapper script handles this automatically — do not run `docker compose build` directly.
-
 ```bash
 ./bin/agent-sandbox build
 ```
 
-The script resolves `id -u agent` and `id -g agent` at build time and passes them as `--build-arg` values. The Dockerfile defaults (`AGENT_UID=1500`, `AGENT_GID=1500`) are only a fallback for builds outside the wrapper.
+The script resolves `id -u` and `id -g` for the invoking user and passes them as `--build-arg` values. The Dockerfile defaults (`AGENT_UID=1000`, `AGENT_GID=1000`) are only a fallback for builds outside the wrapper.
+
+If you later move the repo to a host where your UID differs, rebuild.
 
 ---
 
-## 3. Grant access with ACLs
-
-The wrapper script handles this for you:
+## 3. Initialise container-local Claude state
 
 ```bash
 ./bin/agent-sandbox setup
 ```
 
-This grants the `agent` user POSIX ACL access to each required host path and creates an agent-owned repo-local Claude state dir (`./.claude/` and `./.claude.json`). The container's Claude session is separate from your host's — first run inside the container will prompt `/login` once, and the credentials persist in the repo-local dir (gitignored). Re-run setup after authenticating with GitHub CLI or Gitea CLI if you hit warnings about their config dirs.
+Creates a repo-local `./.claude/` directory and `./.claude.json` file (both gitignored) owned by the host user. The container's Claude session lives there and is independent of your host's Claude Code login — first container run prompts `/login` once, and credentials persist across runs.
 
-The script requires `sudo` to call `setfacl`. If your terminal blocks `sudo` due to `no_new_privs` (common in Flatpak terminals), open a native terminal first.
+The script also warns if `~/.gitconfig`, `~/.config/gh`, or `~/.config/tea` are missing. Create them (or run `gh auth login` / `tea login`) before launching the container.
 
-### What the script grants
-
-ACLs are an extension to standard Unix permissions. `setfacl` adds per-user entries on top of the existing owner/group/other bits without altering them. The script applies exactly the following:
-
-| Path | Permission | Reason |
-|---|---|---|
-| `~` | `x` (traverse) | Home dirs are `700`; agent needs to enter without being able to list |
-| `~/.gitconfig` | `r` | Bind-mounted read-only so agent can commit with your identity |
-| `~/Repositories` | `rwX` + default `rwX` | Agent reads and writes code here; default ACL propagates to new repos |
-| `~/.config/gh` | `rwX` + default `rwX` | `gh` may refresh auth tokens at runtime |
-| `~/.config/tea` | `rwX` + default `rwX` | `tea` may refresh auth tokens at runtime |
-
-Execute-only (`x`) on a directory means the `agent` user can reach paths inside it but cannot list its contents — a much narrower grant than read.
+No `sudo` is required.
 
 ---
 
-## 4. Why ACLs instead of chown or group membership
-
-Two common alternatives and why they are not used here:
-
-- **`chown agent`** — transfers ownership away from you. You would need `sudo` to edit your own files.
-- **`usermod -aG $USER agent`** — adds `agent` to your primary group. Your `umask` typically makes group-readable files readable by `agent`, but it also means `agent` inherits any future files in your home that happen to have group-read set — a much broader grant than intended.
-
-ACLs give targeted, per-path, per-user permissions. The `agent` account is isolated: it can only read or write the specific paths you listed above.
-
----
-
-## 5. Verify the setup
+## 4. Verify the setup
 
 ```bash
 ./bin/agent-sandbox verify
 ```
 
-Prints `OK` or `FAIL` for each required permission and exits non-zero if anything fails. Re-run `./bin/agent-sandbox setup` to fix failures, then verify again.
+Prints `OK` or `FAIL` for each required path and exits non-zero if anything fails. Re-run `./bin/agent-sandbox setup`, or address the failing item, then verify again.
 
-If `sudo -u agent` fails due to `no_new_privs` (Flatpak terminal), open a native terminal to run the verify command.
+---
+
+## 5. Security trade-off
+
+Running the container as your host UID means:
+
+- **You lose:** UID-based isolation between the container and your home directory. If a process inside the container escapes its bind mounts (via a symlink-traversal bug or a future bind-mount you add that points at sensitive data), it acts as your UID and can read/write anything you can.
+- **You keep:** Docker namespace isolation (the container still cannot see host processes, the host network, or unmounted filesystems), no-sudo-in-container (the in-image `agent` user has no `sudoers` entry), SSH-agent forwarding (private keys never enter the container), and a minimal mounted surface (only `~/Repositories`, three config dirs, and the SSH socket are visible inside).
+
+The threat model this configuration is designed against: untrusted code the agent executes inside `~/Repositories` (npm installs, build scripts, test runners). Such code already runs with your privileges in the host's normal workflow; running it inside the container narrows what it can reach to the mounted paths, even though it runs as your UID.
+
+If you need a stronger boundary — e.g. the agent will run wholly untrusted code with broader filesystem access — enable Docker's `userns-remap` in `/etc/docker/daemon.json` to transparently shift the container's UID to an unprivileged host UID without changing the in-container view.
 
 ---
 
@@ -104,6 +69,6 @@ If `sudo -u agent` fails due to `no_new_privs` (Flatpak terminal), open a native
 
 The container has its own Claude Code session, persisted in the repo-local `./.claude/` directory (gitignored). It is **independent** of your host's Claude Code login — refreshes and `/login` events on either side do not affect the other. Each clone or worktree of this repository has its own container session.
 
-Earlier versions of this project shared `~/.claude/` and `~/.claude.json` between host and container. That sharing was removed because host Claude Code rewrites `~/.claude.json` atomically (write tempfile + rename), which strips the `agent` POSIX ACL entry on each rewrite and silently breaks the container's access to its account state.
+Earlier versions of this project shared `~/.claude/` and `~/.claude.json` between host and container via POSIX ACLs. That sharing was removed because host Claude Code rewrites `~/.claude.json` atomically (write tempfile + rename), which strips any ACL entry on each rewrite and silently broke container access. Repo-local state avoids that entire failure mode.
 
 If you want to wipe the container's session (e.g. switch accounts), delete `./.claude/` and `./.claude.json` then re-run `./bin/agent-sandbox setup`.

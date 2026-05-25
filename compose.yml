@@ -4,7 +4,7 @@
 #   - playwright-mcp: Microsoft Playwright MCP sidecar (no host port exposure)
 #
 # Usage:
-#   ./bin/agent-sandbox setup             # one-time host ACL setup
+#   ./bin/agent-sandbox setup             # one-time repo-local Claude state init
 #   ./bin/agent-sandbox build             # build agent image
 #   docker compose up -d playwright-mcp   # start playwright-mcp sidecar in background
 #   ./bin/agent-sandbox                   # interactive bash
@@ -16,8 +16,11 @@ services:
     build:
       context: .
       args:
-        AGENT_UID: "${AGENT_UID:-1500}"
-        AGENT_GID: "${AGENT_GID:-1500}"
+        # Wrapper script (bin/agent-sandbox build) exports AGENT_UID/GID from
+        # `id -u` / `id -g` so files written by the container appear owned by
+        # the host user. Fallback 1000 covers direct `docker compose build`.
+        AGENT_UID: "${AGENT_UID:-1000}"
+        AGENT_GID: "${AGENT_GID:-1000}"
     depends_on:
       - playwright-mcp
     volumes:
