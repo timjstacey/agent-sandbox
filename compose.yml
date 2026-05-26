@@ -24,8 +24,10 @@ services:
     depends_on:
       - playwright-mcp
     volumes:
-      # Host repositories — mirrored path so copy/paste paths work identically
-      - ${HOME}/Repositories:/home/agent/Repositories
+      # Host repositories — mirrored path so copy/paste paths work identically.
+      # PROJECTS_DIR and PROJECTS_BASENAME are written by `bin/agent-sandbox setup`
+      # into .env (gitignored); docker compose auto-reads it.
+      - ${PROJECTS_DIR:-${HOME}/Repositories}:/home/agent/${PROJECTS_BASENAME:-Repositories}
       # Claude state — container-local, separate from host session.
       # Kept inside the repo (gitignored) so each clone/worktree gets its own
       # container login. Avoids ACL drift from host claude rewriting its files

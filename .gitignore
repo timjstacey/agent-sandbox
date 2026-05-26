@@ -1,5 +1,6 @@
 # Container-local Claude state — deny all, allow only committed config files.
 # Add a !/.claude/<file> negation here to deliberately track a new file.
+/.env
 /.claude.json
 /.claude/*
 !/.claude/settings.json
