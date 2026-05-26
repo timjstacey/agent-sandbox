@@ -1,24 +1,58 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# Credentials: copy host-mounted OAuth credentials into agent home so token
-# refreshes succeed inside the container (the agent-owned copy is writable).
-# ---------------------------------------------------------------------------
-# ~/.claude is bind-mounted directly from the host — credentials are shared
-# and persist automatically. No copying needed.
+: "${HOST_USER:?HOST_USER required}" "${HOST_UID:?HOST_UID required}" "${HOST_GID:?HOST_GID required}"
 
-# ---------------------------------------------------------------------------
-# fnm: initialise Fast Node Manager so the default Node LTS is on PATH.
-# ---------------------------------------------------------------------------
-FNM_DIR="${FNM_DIR:-${HOME}/.local/share/fnm}"
-export FNM_DIR
-export PATH="${FNM_DIR}:${PATH}"
-if command -v fnm >/dev/null 2>&1; then
-    eval "$(fnm env --use-on-cd --shell bash)"
+case "$HOST_USER" in
+  root|daemon|bin|sys|nobody)
+    echo "Refusing reserved username: $HOST_USER" >&2; exit 1 ;;
+esac
+
+# Group
+if ! getent group "$HOST_GID" >/dev/null; then
+  groupadd -g "$HOST_GID" "$HOST_USER"
 fi
 
-# ---------------------------------------------------------------------------
-# Hand off to the container command (default: bash via Dockerfile CMD).
-# ---------------------------------------------------------------------------
-exec "$@"
+# User
+if ! getent passwd "$HOST_UID" >/dev/null; then
+  useradd -u "$HOST_UID" -g "$HOST_GID" -m -d "/home/$HOST_USER" \
+          -s /bin/bash --no-log-init "$HOST_USER"
+fi
+RESOLVED_USER="$(getent passwd "$HOST_UID" | cut -d: -f1)"
+HOME_DIR="$(getent passwd "$HOST_UID" | cut -d: -f6)"
+
+# Seed skel once
+if [ ! -f "$HOME_DIR/.bashrc" ]; then
+  cp -aT /etc/skel-agent/ "$HOME_DIR/"
+  mkdir -p "$HOME_DIR/.config/worktrunk"
+fi
+
+# Ensure ownership (named volume may start root-owned)
+chown -R "$HOST_UID:$HOST_GID" "$HOME_DIR"
+
+# First-run provisioning (skipped in CI via SKIP_PROVISION=1)
+MARKER="$HOME_DIR/.agent-sandbox-provisioned"
+if [ ! -f "$MARKER" ] && [ "${SKIP_PROVISION:-0}" != "1" ]; then
+  echo "[entrypoint] first-run provisioning (Node ${PROVISION_NODE_VERSION:-22} + pnpm + bun + claude)..."
+  gosu "$RESOLVED_USER" bash -lc "
+    set -euo pipefail
+    export FNM_DIR=\"\$HOME/.local/share/fnm\"
+    mkdir -p \"\$FNM_DIR\"
+    fnm install ${PROVISION_NODE_VERSION:-22}
+    fnm alias default ${PROVISION_NODE_VERSION:-22}
+    fnm use default
+    eval \"\$(fnm env --shell bash)\"
+    npm install -g pnpm typescript @anthropic-ai/claude-code
+    curl -fsSL https://bun.sh/install | bash
+    wt config shell install --yes bash
+  "
+  touch "$MARKER"
+  chown "$HOST_UID:$HOST_GID" "$MARKER"
+fi
+
+# Warn once per session if gh is not authenticated
+if [ -z "${GH_TOKEN:-}" ] && [ ! -s "$HOME_DIR/.config/gh/hosts.yml" ]; then
+  echo "[entrypoint] gh not authenticated. Run 'gh auth login' inside the container (plaintext) or on host (keyring) and rerun." >&2
+fi
+
+exec gosu "$RESOLVED_USER" "$@"

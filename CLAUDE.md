@@ -19,14 +19,11 @@ Do not re-litigate these without explicit user direction:
 | Claude Code auth | Container-local: bind-mount repo-relative `./.claude/` and `./.claude.json` (gitignored). Separate session from host — first container run prompts `/login` once and persists. Avoids ACL drift caused by host claude rewriting its state files atomically |
 | Container-only MCP | Committed `.claude/mcp-config.json` bind-mounted into container. Interactive shells pick it up via a bashrc `claude()` function; `./bin/agent-sandbox claude` injects `--mcp-config` directly (non-interactive path). No binary shim, no `/etc/claude/`. |
 | Skills | Declared in committed `.claude/settings.json` via `extraKnownMarketplaces` + `enabledPlugins`; fetched from GitHub on first `claude` launch. No image baking — bumping = edit settings.json, delete plugin cache, no rebuild. |
-| `tea` CLI | Gitea `tea` (https://gitea.com/gitea/tea), not tea.xyz |
-| Container user | Non-root `agent` inside the image, UID/GID supplied via `--build-arg` to match the **host invoker** (`id -u`/`id -g`). No separate host `agent` account — bind-mounted files appear owned by the host user, removing the need for POSIX ACLs |
-| Bind-mount layout | Mirror host paths (`-v ~/Repositories:/home/agent/Repositories`) for copy/paste-friendly paths |
+| Container user | **Run-time-injected** via entrypoint from `HOST_USER`/`HOST_UID`/`HOST_GID` env (set by `bin/agent-sandbox`). No build args. Container starts as root (`user: "0:0"`); entrypoint creates matching user and drops via `gosu`. Bind-mounted files appear owned by the host user. |
+| Bind-mount layout | Mirror host paths (`-v ~/Repositories:/home/${HOST_USER}/Repositories`). Container `$HOME` = `/home/${HOST_USER}`, identical to host. |
 | Git push creds | Forward host SSH agent socket (`$SSH_AUTH_SOCK`), never copy keys. Public host keys for git remotes (`github.com`, `gitea.com`, `gitea.sillysamoyed.com`) are baked into `/etc/ssh/ssh_known_hosts` at image build time — rebuild to rotate or add hosts. |
-| Node | `fnm` baked in, default = latest LTS |
-| pnpm + bun | Official upstream installers |
-| Entrypoint | `bash` shell with `claude` on PATH; user invokes Claude Code manually |
-| gh + tea auth | Bind-mount host `~/.config/gh` and `~/.config/tea` read-write. Host `gh` stores OAuth token in system keyring (not in `hosts.yml`), so `bin/agent-sandbox` runs `gh auth token` on the host and injects the result as `GH_TOKEN` env var — picked up automatically by in-container `gh`. Falls back silently (warning only) if host `gh` is absent or unauthenticated. |
+| Toolchain provisioning | `fnm`, `gh`, `wt`, `gosu` baked into image (static binaries / apt). Node + pnpm + bun + claude + typescript provisioned per-user on **first container run** into named volume `agent-home`. Marker file `~/.agent-sandbox-provisioned` gates re-runs. |
+| gh auth | Host login preferred — gh stores in keyring, `bin/agent-sandbox` injects `GH_TOKEN` env. Host-not-logged-in is non-fatal: wrapper creates empty `~/.config/gh` dir, container can run `gh auth login` inline (plaintext, persisted via bind mount). |
 | Git identity | Bind-mount host `~/.gitconfig` read-only |
 | Distribution UX | Host wrapper script `bin/agent-sandbox` wrapping `docker compose run` |
 
@@ -48,9 +45,9 @@ Do not re-litigate these without explicit user direction:
 
 These exist because the container exists to bridge an isolated env to the host. Don't strip them without understanding the consequence:
 
-- `AGENT_UID` / `AGENT_GID` build args — set to the host invoker's `id -u`/`id -g` by `bin/agent-sandbox build` so bind-mounted files appear owned by the host user. No separate host `agent` account is required.
-- No POSIX ACLs needed — direct UID match supersedes the earlier ACL-based scheme. See `docs/host-setup.md` § 5 for the security trade-off.
-- Mirrored bind-mount paths — `~/Repositories` on host maps to `/home/agent/Repositories` in container. Paths look identical apart from the home prefix; preserve this.
+- `HOST_USER`/`HOST_UID`/`HOST_GID` env passthrough — set by `bin/agent-sandbox` from `id -un`/`id -u`/`id -g`, consumed by entrypoint to create matching user at run time. No build args, no separate host account.
+- `COMPOSE_PROJECT_NAME=agent-sandbox-${HOST_USER}` — isolates named volumes per host user on shared Docker daemons.
+- Mirrored bind-mount paths — `~/Repositories` on host maps to `/home/${HOST_USER}/Repositories` in container. Paths look identical; preserve this.
 - Claude state bind-mount — repo-local `./.claude/` and `./.claude.json` are mounted rw into the container. `.claude/settings.json` and `.claude/mcp-config.json` are **committed**; runtime state (credentials, sessions, plugin cache) is gitignored. Session is independent of the host's Claude Code login — each clone/worktree has its own container session.
 - SSH agent socket forwarding — `$SSH_AUTH_SOCK` is bind-mounted; container never holds its own SSH private keys.
 - `GH_TOKEN` injection — `bin/agent-sandbox` calls `gh auth token` on the host to extract the OAuth token from the system keyring (where host `gh` stores it) and exports it as `GH_TOKEN`. Compose passes it into the agent container; `gh` inside the container picks it up automatically. If host `gh` is absent or unauthenticated, a warning is printed and the container still starts — `gh` inside will be unauthenticated. Token is never written to disk inside the container; each `docker compose run` invocation gets a fresh env copy.
@@ -72,7 +69,7 @@ Caveman's own plugin registers the `SessionStart` hook that activates caveman mo
 # One-time: initialise repo-local Claude login state
 ./bin/agent-sandbox setup
 
-# Build agent image (UID/GID matched to host invoker — wrapper handles it)
+# Build agent image (portable — no UID baking)
 ./bin/agent-sandbox build
 
 # Full stack (agent + playwright-mcp sidecar)

@@ -1,13 +1,6 @@
 # syntax=docker/dockerfile:1
 FROM debian:trixie-slim
 
-# ─── Build args ──────────────────────────────────────────────────────────────
-# Default to the conventional first-user UID/GID on Linux desktops. The wrapper
-# script (bin/agent-sandbox build) overrides these with `id -u` / `id -g` of
-# the invoking host user so that bind-mounted files land owned by that user.
-ARG AGENT_UID=1000
-ARG AGENT_GID=1000
-
 # ─── Layer 1: System packages ────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -19,8 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xz-utils \
     unzip \
     libatomic1 \
-    acl \
     bash-completion \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # ─── Layer 2: GitHub CLI (gh) via official apt repo ─────────────────────────
@@ -45,16 +38,7 @@ RUN ssh-keyscan -t rsa,ecdsa,ed25519 \
         > /etc/ssh/ssh_known_hosts \
     && chmod 0644 /etc/ssh/ssh_known_hosts
 
-# ─── Layer 3: Gitea tea CLI (static binary) ──────────────────────────────────
-ARG TEA_VERSION=0.14.1
-RUN arch="$(dpkg --print-architecture)" \
-    && curl -fsSL \
-       "https://gitea.com/gitea/tea/releases/download/v${TEA_VERSION}/tea-${TEA_VERSION}-linux-${arch}" \
-       -o /usr/local/bin/tea \
-    && chmod +x /usr/local/bin/tea \
-    && tea --version
-
-# ─── Layer 3b: worktrunk wt CLI (static musl binary) ────────────────────────
+# ─── Layer 3: worktrunk wt CLI (static musl binary) ─────────────────────────
 ARG WT_VERSION=0.53.0
 RUN arch="$(dpkg --print-architecture)" \
     && case "${arch}" in \
@@ -72,95 +56,33 @@ RUN arch="$(dpkg --print-architecture)" \
     && rm -rf /tmp/worktrunk* \
     && wt --version
 
-# ─── Layer 4: agent user ─────────────────────────────────────────────────────
-# UID/GID match the host invoker so bind-mounted files appear owned by them on
-# the host (no sudo needed to edit). Defensive: reuse any pre-existing group/
-# user that already occupies the target UID/GID rather than failing the build.
-RUN if ! getent group "${AGENT_GID}" >/dev/null; then \
-        groupadd --gid "${AGENT_GID}" agent; \
-    fi \
-    && if ! getent passwd "${AGENT_UID}" >/dev/null; then \
-        useradd --uid "${AGENT_UID}" --gid "${AGENT_GID}" \
-                --create-home --home-dir /home/agent \
-                --shell /bin/bash \
-                --no-log-init \
-                agent; \
-    fi \
-    && mkdir -p /home/agent/Repositories \
-    && chown -R "${AGENT_UID}:${AGENT_GID}" /home/agent
+# ─── Layer 4: fnm (static binary) ────────────────────────────────────────────
+ARG FNM_VERSION=1.38.1
+RUN arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+       amd64) fnm_arch="linux-x64" ;; \
+       arm64) fnm_arch="linux-arm64" ;; \
+       *) echo "Unsupported arch: $arch"; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/fnm.zip \
+       "https://github.com/Schniz/fnm/releases/download/v${FNM_VERSION}/fnm-${fnm_arch}.zip" \
+    && unzip -p /tmp/fnm.zip fnm > /usr/local/bin/fnm \
+    && chmod +x /usr/local/bin/fnm \
+    && rm /tmp/fnm.zip \
+    && fnm --version
 
-# ─── Copy entrypoint (as root, before USER switch) ───────────────────────────
+# ─── Entrypoint + skel ───────────────────────────────────────────────────────
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint
+COPY docker/skel-agent /etc/skel-agent
 
-# ─── Switch to non-root agent user ───────────────────────────────────────────
-USER agent
-WORKDIR /home/agent
+# ─── Runtime provisioning config ─────────────────────────────────────────────
+ARG NODE_VERSION=22
+ENV PROVISION_NODE_VERSION=${NODE_VERSION}
 
 ENV SHELL=/bin/bash
-# Default terminal type — claude (and most TUIs) refuse to draw without one,
-# and `docker compose run` does not forward host TERM by default.
 ENV TERM=xterm-256color
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-# ─── Layer 5: fnm (Fast Node Manager) ────────────────────────────────────────
-ENV FNM_DIR="/home/agent/.local/share/fnm"
-ENV PATH="${FNM_DIR}:${PATH}"
-# hadolint ignore=SC2016
-RUN curl -fsSL https://fnm.vercel.app/install | bash \
-    && echo 'eval "$(fnm env --use-on-cd --shell bash)"' >> ~/.bashrc
-
-# ─── Layer 6: Node LTS (22) via fnm ─────────────────────────────────────────
-# fnm installs Node into $FNM_DIR/node-versions/; the default alias symlink sits at
-# $FNM_DIR/aliases/default → ../node-versions/<version>/installation
-# We add that bin dir to PATH so subsequent RUN layers (and ENV at runtime) see node/npm.
-RUN eval "$(fnm env --use-on-cd --shell bash)" \
-    && fnm install --lts \
-    && fnm alias default lts-latest \
-    && fnm use default \
-    && node -v && npm -v
-
-ENV PATH="/home/agent/.local/share/fnm/aliases/default/bin:${PATH}"
-
-# ─── Layer 7: pnpm ───────────────────────────────────────────────────────────
-ENV PNPM_HOME="/home/agent/.local/share/pnpm"
-ENV PATH="${PNPM_HOME}/bin:${PATH}"
-
-RUN eval "$(fnm env --use-on-cd --shell bash)" \
-    && curl -fsSL https://get.pnpm.io/install.sh | sh - \
-    && pnpm -v
-
-# ─── Layer 8: bun ────────────────────────────────────────────────────────────
-ENV BUN_INSTALL="/home/agent/.bun"
-ENV PATH="/home/agent/.bun/bin:${PATH}"
-
-# hadolint ignore=SC2016
-RUN curl -fsSL https://bun.sh/install | bash \
-    && echo 'export BUN_INSTALL="/home/agent/.bun"' >> ~/.bashrc \
-    && echo 'export PATH="/home/agent/.bun/bin:$PATH"' >> ~/.bashrc \
-    && bun -v
-
-# ─── Layer 9: TypeScript + Claude Code ───────────────────────────────────────
-# hadolint ignore=DL3016
-RUN eval "$(fnm env --use-on-cd --shell bash)" \
-    && npm install -g typescript @anthropic-ai/claude-code \
-    && tsc -v && claude --version
-
-# ─── Layer 9b: bashrc setup ──────────────────────────────────────────────────
-# claude(): inject --mcp-config from repo-mounted .claude/ in interactive shells;
-#   bin/agent-sandbox handles the flag for non-interactive subcommand invocations.
-# wt shell install: registers worktrunk shell hook (cd integration) in ~/.bashrc.
-# mkdir ~/.config/worktrunk: pre-create with agent ownership so the wt-config
-#   bind-mount (compose.yml) lands owned by agent, not root.
-# hadolint ignore=SC2016
-RUN printf '%s\n' \
-    'claude() { command claude --mcp-config "$HOME/.claude/mcp-config.json" "$@"; }' \
-    >> /home/agent/.bashrc \
-    && wt config shell install --yes bash \
-    && mkdir -p ~/.config/worktrunk
-
-# ─── Final configuration ─────────────────────────────────────────────────────
-WORKDIR /home/agent/Repositories
 
 ENTRYPOINT ["/usr/local/bin/entrypoint"]
 CMD ["bash"]

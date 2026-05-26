@@ -15,40 +15,29 @@ services:
   agent:
     build:
       context: .
-      args:
-        # Wrapper script (bin/agent-sandbox build) exports AGENT_UID/GID from
-        # `id -u` / `id -g` so files written by the container appear owned by
-        # the host user. Fallback 1000 covers direct `docker compose build`.
-        AGENT_UID: "${AGENT_UID:-1000}"
-        AGENT_GID: "${AGENT_GID:-1000}"
+    user: "0:0"
+    environment:
+      HOST_USER: "${HOST_USER:?run via bin/agent-sandbox}"
+      HOST_UID:  "${HOST_UID:?}"
+      HOST_GID:  "${HOST_GID:?}"
+      SSH_AUTH_SOCK: /ssh-agent
+      GH_TOKEN: ${GH_TOKEN:-}
     depends_on:
       - playwright-mcp
     volumes:
-      # Host repositories — mirrored path so copy/paste paths work identically.
-      # PROJECTS_DIR and PROJECTS_BASENAME are written by `bin/agent-sandbox setup`
-      # into .env (gitignored); docker compose auto-reads it.
-      - ${PROJECTS_DIR:-${HOME}/Repositories}:/home/agent/${PROJECTS_BASENAME:-Repositories}
-      # Claude state — container-local, separate from host session.
-      # Kept inside the repo (gitignored) so each clone/worktree gets its own
-      # container login. Avoids ACL drift from host claude rewriting its files
-      # atomically (which strips agent's ACL entry). First container run will
-      # prompt /login; credentials persist in ./.claude/.credentials.json.
-      - ./.claude:/home/agent/.claude
-      - ./.claude.json:/home/agent/.claude.json
-      # worktrunk user config — source-controlled default; edits inside the
-      # container persist back to the repo via this bind mount.
-      - ./docker/wt-config.toml:/home/agent/.config/worktrunk/config.toml
-      # Git identity
-      - ${HOME}/.gitconfig:/home/agent/.gitconfig:ro
-      # GitHub CLI config (read-write so auth tokens can refresh)
-      - ${HOME}/.config/gh:/home/agent/.config/gh
-      # Gitea tea CLI config (read-write so auth tokens can refresh)
-      - ${HOME}/.config/tea:/home/agent/.config/tea
-      # SSH agent socket forwarding — container never holds private keys
+      # Named volume persists $HOME (provisioning marker, Node, pnpm, bun, claude)
+      - agent-home:/home/${HOST_USER}
+      # Repos bind (mirrored path so container ↔ host paths match)
+      - ${PROJECTS_DIR:-${HOME}/Repositories}:/home/${HOST_USER}/${PROJECTS_BASENAME:-Repositories}
+      # Claude state (repo-local, committed settings + gitignored creds)
+      - ./.claude:/home/${HOST_USER}/.claude
+      - ./.claude.json:/home/${HOST_USER}/.claude.json
+      # Worktrunk config
+      - ./docker/wt-config.toml:/home/${HOST_USER}/.config/worktrunk/config.toml
+      # Identity + tool configs (wrapper creates host dirs if missing)
+      - ${HOME}/.gitconfig:/home/${HOST_USER}/.gitconfig:ro
+      - ${HOME}/.config/gh:/home/${HOST_USER}/.config/gh
       - ${SSH_AUTH_SOCK:-/tmp/ssh-auth-sock}:/ssh-agent
-    environment:
-      SSH_AUTH_SOCK: /ssh-agent
-      GH_TOKEN: ${GH_TOKEN:-}
     networks:
       - internal
 
@@ -62,6 +51,9 @@ services:
     # No host port mapping — only reachable on the internal bridge network.
     networks:
       - internal
+
+volumes:
+  agent-home:
 
 networks:
   internal:
