@@ -30,6 +30,17 @@ case "${1:-}" in
       echo "Warning: ~/.gitconfig not found — container will lack git identity until you create one." >&2
     fi
 
+    # Pre-install plugins into the bind-mounted .claude/plugins/cache/ so the
+    # caveman SessionStart hook fires on first claude launch rather than the
+    # second. Requires the image to be built; skip gracefully if not yet done.
+    echo "Pre-installing Claude plugins (caveman, worktrunk)..."
+    if docker compose -f "${COMPOSE_FILE}" run --rm --no-deps agent \
+         bash -c 'claude plugin install caveman@caveman && claude plugin install worktrunk@worktrunk'; then
+      echo "plugins:       installed"
+    else
+      echo "Warning: Plugin pre-install failed — re-run setup after './bin/agent-sandbox build'." >&2
+    fi
+
     echo "Done. Run './bin/agent-sandbox verify' to confirm."
     ;;
 
@@ -43,6 +54,11 @@ case "${1:-}" in
     test -f "${REPO_DIR}/.claude/settings.json" \
       && echo "settings:     OK" \
       || { echo "settings:     FAIL (missing .claude/settings.json — git checkout?)"; ok=false; }
+
+    # Warn but don't fail — plugins auto-install on first claude launch if absent
+    test -d "${REPO_DIR}/.claude/plugins/cache/caveman" \
+      && echo "plugins:      OK" \
+      || echo "plugins:      WARN (not pre-installed — run setup after build)"
 
     test -w "${REPO_DIR}/.claude.json" \
       && echo "session:      OK" \
