@@ -60,12 +60,12 @@ RUN arch="$(dpkg --print-architecture)" \
 ARG FNM_VERSION=1.38.1
 RUN arch="$(dpkg --print-architecture)" \
     && case "$arch" in \
-       amd64) fnm_arch="linux-x64" ;; \
-       arm64) fnm_arch="linux-arm64" ;; \
+       amd64) fnm_zip="fnm-linux.zip" ;; \
+       arm64) fnm_zip="fnm-arm64.zip" ;; \
        *) echo "Unsupported arch: $arch"; exit 1 ;; \
     esac \
     && curl -fsSL -o /tmp/fnm.zip \
-       "https://github.com/Schniz/fnm/releases/download/v${FNM_VERSION}/fnm-${fnm_arch}.zip" \
+       "https://github.com/Schniz/fnm/releases/download/v${FNM_VERSION}/${fnm_zip}" \
     && unzip -p /tmp/fnm.zip fnm > /usr/local/bin/fnm \
     && chmod +x /usr/local/bin/fnm \
     && rm /tmp/fnm.zip \
