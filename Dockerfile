@@ -139,7 +139,7 @@ RUN eval "$(fnm env --use-on-cd --shell bash)" \
 RUN printf '%s\n' \
     'claude() { command claude --mcp-config "$HOME/.claude/mcp-config.json" "$@"; }' \
     >> /home/agent/.bashrc \
-    && wt config shell install
+    && wt config shell install --yes bash
 
 # ─── Final configuration ─────────────────────────────────────────────────────
 WORKDIR /home/agent/Repositories
