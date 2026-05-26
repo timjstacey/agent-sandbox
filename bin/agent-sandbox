@@ -12,6 +12,25 @@ case "${1:-}" in
   setup)
     echo "Initialising container-local Claude state..."
 
+    # Prompt for projects directory and write .env (docker compose auto-reads it).
+    if [[ -f "${REPO_DIR}/.env" ]]; then
+      # shellcheck source=/dev/null
+      set -a; source "${REPO_DIR}/.env"; set +a
+      echo "Projects directory currently set to: ${PROJECTS_DIR}"
+      read -r -p "Projects directory to mount [${PROJECTS_DIR}]: " INPUT_DIR
+      PROJECTS_DIR="${INPUT_DIR:-${PROJECTS_DIR}}"
+    else
+      read -r -p "Projects directory to mount [${HOME}/Repositories]: " INPUT_DIR
+      PROJECTS_DIR="${INPUT_DIR:-${HOME}/Repositories}"
+    fi
+    PROJECTS_DIR="${PROJECTS_DIR%/}"  # strip trailing slash
+    PROJECTS_BASENAME="$(basename "${PROJECTS_DIR}")"
+    cat > "${REPO_DIR}/.env" <<EOF
+PROJECTS_DIR=${PROJECTS_DIR}
+PROJECTS_BASENAME=${PROJECTS_BASENAME}
+EOF
+    echo "Wrote .env: PROJECTS_DIR=${PROJECTS_DIR}"
+
     # .claude/ is committed (settings.json + mcp-config.json tracked in git).
     # Only .claude.json (login state) needs pre-creation as the right inode type
     # before docker bind-mounts it (missing file gets auto-created as a dir).
@@ -68,9 +87,16 @@ case "${1:-}" in
       && echo "gitconfig:    OK" \
       || { echo "gitconfig:    FAIL (create ~/.gitconfig)"; ok=false; }
 
-    test -w "${HOME}/Repositories" \
-      && echo "repos write:  OK" \
-      || { echo "repos write:  FAIL"; ok=false; }
+    ENV_FILE="${REPO_DIR}/.env"
+    if [[ -f "$ENV_FILE" ]]; then
+      # shellcheck source=/dev/null
+      set -a; source "$ENV_FILE"; set +a
+    fi
+    PROJECTS_DIR="${PROJECTS_DIR:-${HOME}/Repositories}"
+
+    test -w "${PROJECTS_DIR}" \
+      && echo "repos write:  OK (${PROJECTS_DIR})" \
+      || { echo "repos write:  FAIL (${PROJECTS_DIR}) — run setup"; ok=false; }
 
     test -w "${HOME}/.config/gh" \
       && echo "gh write:     OK" \
@@ -113,15 +139,21 @@ case "${1:-}" in
       fi
     done
 
+    # If ass set AGENT_WORKDIR, pass it as the container working directory.
+    WORKDIR_FLAG=()
+    if [[ -n "${AGENT_WORKDIR:-}" ]]; then
+      WORKDIR_FLAG=(-w "${AGENT_WORKDIR}")
+    fi
+
     # bashrc function injects --mcp-config for interactive shell sessions, but
     # is not in scope when claude is passed as a subcommand (non-interactive).
     # Inject the flag explicitly for that path.
     if [[ "${1:-}" == "claude" ]]; then
       shift
-      exec docker compose -f "${COMPOSE_FILE}" run --rm agent \
+      exec docker compose -f "${COMPOSE_FILE}" run --rm "${WORKDIR_FLAG[@]}" agent \
         claude --mcp-config /home/agent/.claude/mcp-config.json "$@"
     else
-      exec docker compose -f "${COMPOSE_FILE}" run --rm agent "$@"
+      exec docker compose -f "${COMPOSE_FILE}" run --rm "${WORKDIR_FLAG[@]}" agent "$@"
     fi
     ;;
 
