@@ -18,6 +18,10 @@
     }
   },
   "theme": "dark-ansi",
+  "statusLine": {
+    "type": "command",
+    "command": "bash \"/home/agent/.claude/combined-statusline.sh\""
+  },
   "hooks": {
     "SessionStart": [
       {
