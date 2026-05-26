@@ -22,7 +22,7 @@ Do not re-litigate these without explicit user direction:
 | `tea` CLI | Gitea `tea` (https://gitea.com/gitea/tea), not tea.xyz |
 | Container user | Non-root `agent` inside the image, UID/GID supplied via `--build-arg` to match the **host invoker** (`id -u`/`id -g`). No separate host `agent` account — bind-mounted files appear owned by the host user, removing the need for POSIX ACLs |
 | Bind-mount layout | Mirror host paths (`-v ~/Repositories:/home/agent/Repositories`) for copy/paste-friendly paths |
-| Git push creds | Forward host SSH agent socket (`$SSH_AUTH_SOCK`), never copy keys |
+| Git push creds | Forward host SSH agent socket (`$SSH_AUTH_SOCK`), never copy keys. Public host keys for git remotes (`github.com`, `gitea.com`, `gitea.sillysamoyed.com`) are baked into `/etc/ssh/ssh_known_hosts` at image build time — rebuild to rotate or add hosts. |
 | Node | `fnm` baked in, default = latest LTS |
 | pnpm + bun | Official upstream installers |
 | Entrypoint | `bash` shell with `claude` on PATH; user invokes Claude Code manually |
