@@ -6,6 +6,23 @@ SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 REPO_DIR="$(readlink -f "${SCRIPT_DIR}/..")"
 COMPOSE_FILE="${REPO_DIR}/compose.yml"
 
+# --- Resolve GH_TOKEN from host keyring ---
+# gh stores the OAuth token in the system keyring, not in ~/.config/gh/hosts.yml.
+# Inject it as GH_TOKEN so the in-container gh can authenticate without keyring access.
+resolve_gh_token() {
+  if ! command -v gh &>/dev/null; then
+    echo "Warning: gh not installed on host — container gh will be unauthenticated." >&2
+    return
+  fi
+  local token
+  token="$(gh auth token 2>/dev/null)" || true
+  if [[ -n "${token}" ]]; then
+    export GH_TOKEN="${token}"
+  else
+    echo "Warning: gh not authenticated on host — container gh will be unauthenticated. Run 'gh auth login' on host or 'gh auth login' inside the container." >&2
+  fi
+}
+
 # --- Dispatch ---
 case "${1:-}" in
 
@@ -112,6 +129,8 @@ case "${1:-}" in
         exit 1
       fi
     done
+
+    resolve_gh_token
 
     # bashrc function injects --mcp-config for interactive shell sessions, but
     # is not in scope when claude is passed as a subcommand (non-interactive).
