@@ -1,16 +1,7 @@
-# Container-local Claude state (per-clone session, separate from host login)
+# Container-local Claude state — deny all, allow only committed config files.
+# Add a !/.claude/<file> negation here to deliberately track a new file.
 /.claude.json
-/.claude/.credentials.json
-/.claude/.caveman-active
-/.claude/history.jsonl
-/.claude/mcp-needs-auth-cache.json
-/.claude/projects/
-/.claude/sessions/
-/.claude/session-env/
-/.claude/cache/
-/.claude/backups/
-/.claude/plugins/cache/
-/.claude/plugins/data/
-/.claude/plugins/installed_plugins.json
-/.claude/plugins/known_marketplaces.json
-/.claude/plugins/install-counts-cache.json
+/.claude/*
+!/.claude/settings.json
+!/.claude/mcp-config.json
+!/.claude/combined-statusline.sh
