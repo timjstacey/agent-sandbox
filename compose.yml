@@ -33,6 +33,9 @@ services:
       # prompt /login; credentials persist in ./.claude/.credentials.json.
       - ./.claude:/home/agent/.claude
       - ./.claude.json:/home/agent/.claude.json
+      # worktrunk user config — source-controlled default; edits inside the
+      # container persist back to the repo via this bind mount.
+      - ./docker/wt-config.toml:/home/agent/.config/worktrunk/config.toml
       # Git identity
       - ${HOME}/.gitconfig:/home/agent/.gitconfig:ro
       # GitHub CLI config (read-write so auth tokens can refresh)
