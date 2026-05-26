@@ -48,6 +48,7 @@ services:
       - ${SSH_AUTH_SOCK}:/ssh-agent
     environment:
       SSH_AUTH_SOCK: /ssh-agent
+      GH_TOKEN: ${GH_TOKEN:-}
     networks:
       - internal
 
