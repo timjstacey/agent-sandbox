@@ -1,10 +1,47 @@
 {
-  "extraKnownMarketplaces": {
-    "caveman":   { "source": { "source": "github", "repo": "JuliusBrussee/caveman" } },
-    "worktrunk": { "source": { "source": "github", "repo": "max-sixty/worktrunk" } }
-  },
   "enabledPlugins": {
-    "caveman@caveman":   true,
+    "caveman@caveman": true,
     "worktrunk@worktrunk": true
+  },
+  "extraKnownMarketplaces": {
+    "caveman": {
+      "source": {
+        "source": "github",
+        "repo": "JuliusBrussee/caveman"
+      }
+    },
+    "worktrunk": {
+      "source": {
+        "source": "github",
+        "repo": "max-sixty/worktrunk"
+      }
+    }
+  },
+  "theme": "dark-ansi",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'f=$(find \"$HOME/.claude/plugins/cache/caveman\" -name caveman-activate.js 2>/dev/null | head -1); [ -n \"$f\" ] && node \"$f\" || true'",
+            "timeout": 5,
+            "statusMessage": "Loading caveman mode..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'f=$(find \"$HOME/.claude/plugins/cache/caveman\" -name caveman-mode-tracker.js 2>/dev/null | head -1); [ -n \"$f\" ] && node \"$f\" || true'",
+            "timeout": 5,
+            "statusMessage": "Tracking caveman mode..."
+          }
+        ]
+      }
+    ]
   }
 }
