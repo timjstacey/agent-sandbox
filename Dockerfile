@@ -34,6 +34,17 @@ RUN mkdir -p /etc/apt/keyrings \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
+# ─── Layer 2b: Seed known_hosts for git remotes ─────────────────────────────
+# Container has no per-user ~/.ssh and no /etc/ssh/ssh_known_hosts by default,
+# so the first `git push` / `gh pr create` over SSH fails with
+# "Host key verification failed". Seed the public host keys for the remotes
+# this project pushes to. Rebuild the image to pick up key rotations or to
+# add new hosts.
+RUN ssh-keyscan -t rsa,ecdsa,ed25519 \
+        github.com gitea.com gitea.sillysamoyed.com \
+        > /etc/ssh/ssh_known_hosts \
+    && chmod 0644 /etc/ssh/ssh_known_hosts
+
 # ─── Layer 3: Gitea tea CLI (static binary) ──────────────────────────────────
 ARG TEA_VERSION=0.14.1
 RUN arch="$(dpkg --print-architecture)" \
