@@ -45,7 +45,7 @@ services:
       # Gitea tea CLI config (read-write so auth tokens can refresh)
       - ${HOME}/.config/tea:/home/agent/.config/tea
       # SSH agent socket forwarding — container never holds private keys
-      - ${SSH_AUTH_SOCK}:/ssh-agent
+      - ${SSH_AUTH_SOCK:-/tmp/ssh-auth-sock}:/ssh-agent
     environment:
       SSH_AUTH_SOCK: /ssh-agent
       GH_TOKEN: ${GH_TOKEN:-}

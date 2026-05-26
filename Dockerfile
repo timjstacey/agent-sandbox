@@ -101,11 +101,12 @@ ENV SHELL=/bin/bash
 # Default terminal type — claude (and most TUIs) refuse to draw without one,
 # and `docker compose run` does not forward host TERM by default.
 ENV TERM=xterm-256color
-SHELL ["/bin/bash", "-c"]
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # ─── Layer 5: fnm (Fast Node Manager) ────────────────────────────────────────
 ENV FNM_DIR="/home/agent/.local/share/fnm"
 ENV PATH="${FNM_DIR}:${PATH}"
+# hadolint ignore=SC2016
 RUN curl -fsSL https://fnm.vercel.app/install | bash \
     && echo 'eval "$(fnm env --use-on-cd --shell bash)"' >> ~/.bashrc
 
@@ -133,12 +134,14 @@ RUN eval "$(fnm env --use-on-cd --shell bash)" \
 ENV BUN_INSTALL="/home/agent/.bun"
 ENV PATH="/home/agent/.bun/bin:${PATH}"
 
+# hadolint ignore=SC2016
 RUN curl -fsSL https://bun.sh/install | bash \
     && echo 'export BUN_INSTALL="/home/agent/.bun"' >> ~/.bashrc \
     && echo 'export PATH="/home/agent/.bun/bin:$PATH"' >> ~/.bashrc \
     && bun -v
 
 # ─── Layer 9: TypeScript + Claude Code ───────────────────────────────────────
+# hadolint ignore=DL3016
 RUN eval "$(fnm env --use-on-cd --shell bash)" \
     && npm install -g typescript @anthropic-ai/claude-code \
     && tsc -v && claude --version
@@ -149,6 +152,7 @@ RUN eval "$(fnm env --use-on-cd --shell bash)" \
 # wt shell install: registers worktrunk shell hook (cd integration) in ~/.bashrc.
 # mkdir ~/.config/worktrunk: pre-create with agent ownership so the wt-config
 #   bind-mount (compose.yml) lands owned by agent, not root.
+# hadolint ignore=SC2016
 RUN printf '%s\n' \
     'claude() { command claude --mcp-config "$HOME/.claude/mcp-config.json" "$@"; }' \
     >> /home/agent/.bashrc \
