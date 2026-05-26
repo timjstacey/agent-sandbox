@@ -21,10 +21,12 @@ fi
 RESOLVED_USER="$(getent passwd "$HOST_UID" | cut -d: -f1)"
 HOME_DIR="$(getent passwd "$HOST_UID" | cut -d: -f6)"
 
-# Seed skel once
-if [ ! -f "$HOME_DIR/.bashrc" ]; then
+# Seed skel once — useradd -m already copies /etc/skel (which may include a
+# default .bashrc), so we overlay skel-agent on top and track with our own marker.
+if [ ! -f "$HOME_DIR/.skel-agent-seeded" ]; then
   cp -aT /etc/skel-agent/ "$HOME_DIR/"
   mkdir -p "$HOME_DIR/.config/worktrunk"
+  touch "$HOME_DIR/.skel-agent-seeded"
 fi
 
 # Ensure ownership (named volume may start root-owned)
