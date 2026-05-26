@@ -26,7 +26,7 @@ Do not re-litigate these without explicit user direction:
 | Node | `fnm` baked in, default = latest LTS |
 | pnpm + bun | Official upstream installers |
 | Entrypoint | `bash` shell with `claude` on PATH; user invokes Claude Code manually |
-| gh + tea auth | Bind-mount host `~/.config/gh` and `~/.config/tea` read-write |
+| gh + tea auth | Bind-mount host `~/.config/gh` and `~/.config/tea` read-write. Host `gh` stores OAuth token in system keyring (not in `hosts.yml`), so `bin/agent-sandbox` runs `gh auth token` on the host and injects the result as `GH_TOKEN` env var — picked up automatically by in-container `gh`. Falls back silently (warning only) if host `gh` is absent or unauthenticated. |
 | Git identity | Bind-mount host `~/.gitconfig` read-only |
 | Distribution UX | Host wrapper script `bin/agent-sandbox` wrapping `docker compose run` |
 
@@ -53,6 +53,7 @@ These exist because the container exists to bridge an isolated env to the host. 
 - Mirrored bind-mount paths — `~/Repositories` on host maps to `/home/agent/Repositories` in container. Paths look identical apart from the home prefix; preserve this.
 - Claude state bind-mount — repo-local `./.claude/` and `./.claude.json` are mounted rw into the container. `.claude/settings.json` and `.claude/mcp-config.json` are **committed**; runtime state (credentials, sessions, plugin cache) is gitignored. Session is independent of the host's Claude Code login — each clone/worktree has its own container session.
 - SSH agent socket forwarding — `$SSH_AUTH_SOCK` is bind-mounted; container never holds its own SSH private keys.
+- `GH_TOKEN` injection — `bin/agent-sandbox` calls `gh auth token` on the host to extract the OAuth token from the system keyring (where host `gh` stores it) and exports it as `GH_TOKEN`. Compose passes it into the agent container; `gh` inside the container picks it up automatically. If host `gh` is absent or unauthenticated, a warning is printed and the container still starts — `gh` inside will be unauthenticated. Token is never written to disk inside the container; each `docker compose run` invocation gets a fresh env copy.
 
 ## Skills are marketplace-installed (repo-side)
 

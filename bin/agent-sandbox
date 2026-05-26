@@ -6,6 +6,23 @@ SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 REPO_DIR="$(readlink -f "${SCRIPT_DIR}/..")"
 COMPOSE_FILE="${REPO_DIR}/compose.yml"
 
+# --- Resolve GH_TOKEN from host keyring ---
+# gh stores the OAuth token in the system keyring, not in ~/.config/gh/hosts.yml.
+# Inject it as GH_TOKEN so the in-container gh can authenticate without keyring access.
+resolve_gh_token() {
+  if ! command -v gh &>/dev/null; then
+    echo "Warning: gh not installed on host — container gh will be unauthenticated." >&2
+    return
+  fi
+  local token
+  token="$(gh auth token 2>/dev/null)" || true
+  if [[ -n "${token}" ]]; then
+    export GH_TOKEN="${token}"
+  else
+    echo "Warning: gh not authenticated on host — container gh will be unauthenticated. Run 'gh auth login' on host or 'gh auth login' inside the container." >&2
+  fi
+}
+
 # --- Dispatch ---
 case "${1:-}" in
 
@@ -145,15 +162,19 @@ EOF
       WORKDIR_FLAG=(-w "${AGENT_WORKDIR}")
     fi
 
+    resolve_gh_token
+    GH_TOKEN_FLAG=()
+    [[ -n "${GH_TOKEN:-}" ]] && GH_TOKEN_FLAG=(-e "GH_TOKEN=${GH_TOKEN}")
+
     # bashrc function injects --mcp-config for interactive shell sessions, but
     # is not in scope when claude is passed as a subcommand (non-interactive).
     # Inject the flag explicitly for that path.
     if [[ "${1:-}" == "claude" ]]; then
       shift
-      exec docker compose -f "${COMPOSE_FILE}" run --rm "${WORKDIR_FLAG[@]}" agent \
+      exec docker compose -f "${COMPOSE_FILE}" run --rm "${GH_TOKEN_FLAG[@]}" "${WORKDIR_FLAG[@]}" agent \
         claude --mcp-config /home/agent/.claude/mcp-config.json "$@"
     else
-      exec docker compose -f "${COMPOSE_FILE}" run --rm "${WORKDIR_FLAG[@]}" agent "$@"
+      exec docker compose -f "${COMPOSE_FILE}" run --rm "${GH_TOKEN_FLAG[@]}" "${WORKDIR_FLAG[@]}" agent "$@"
     fi
     ;;
 
