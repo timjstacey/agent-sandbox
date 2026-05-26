@@ -1,3 +1,16 @@
 # Container-local Claude state (per-clone session, separate from host login)
-/.claude/
 /.claude.json
+/.claude/.credentials.json
+/.claude/.caveman-active
+/.claude/history.jsonl
+/.claude/mcp-needs-auth-cache.json
+/.claude/projects/
+/.claude/sessions/
+/.claude/session-env/
+/.claude/cache/
+/.claude/backups/
+/.claude/plugins/cache/
+/.claude/plugins/data/
+/.claude/plugins/installed_plugins.json
+/.claude/plugins/known_marketplaces.json
+/.claude/plugins/install-counts-cache.json

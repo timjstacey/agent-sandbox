@@ -17,8 +17,8 @@ Do not re-litigate these without explicit user direction:
 | Base image | `debian:trixie-slim` |
 | Playwright MCP | Sidecar container (`mcr.microsoft.com/playwright/mcp`), connected over the compose network |
 | Claude Code auth | Container-local: bind-mount repo-relative `./.claude/` and `./.claude.json` (gitignored). Separate session from host — first container run prompts `/login` once and persists. Avoids ACL drift caused by host claude rewriting its state files atomically |
-| Container-only MCP | Loaded via `claude --mcp-config /etc/claude/mcp-config.json` injected by a shim at `$(which claude)`, so the bind-mounted `./.claude.json` is not polluted with container-only server entries |
-| Skills | Baked at build via pinned `git clone` (caveman + worktrunk); caveman auto-activates at session start to cut token usage |
+| Container-only MCP | Committed `.claude/mcp-config.json` bind-mounted into container. Interactive shells pick it up via a bashrc `claude()` function; `./bin/agent-sandbox claude` injects `--mcp-config` directly (non-interactive path). No binary shim, no `/etc/claude/`. |
+| Skills | Declared in committed `.claude/settings.json` via `extraKnownMarketplaces` + `enabledPlugins`; fetched from GitHub on first `claude` launch. No image baking — bumping = edit settings.json, delete plugin cache, no rebuild. |
 | `tea` CLI | Gitea `tea` (https://gitea.com/gitea/tea), not tea.xyz |
 | Container user | Non-root `agent` inside the image, UID/GID supplied via `--build-arg` to match the **host invoker** (`id -u`/`id -g`). No separate host `agent` account — bind-mounted files appear owned by the host user, removing the need for POSIX ACLs |
 | Bind-mount layout | Mirror host paths (`-v ~/Repositories:/home/agent/Repositories`) for copy/paste-friendly paths |
@@ -51,23 +51,26 @@ These exist because the container exists to bridge an isolated env to the host. 
 - `AGENT_UID` / `AGENT_GID` build args — set to the host invoker's `id -u`/`id -g` by `bin/agent-sandbox build` so bind-mounted files appear owned by the host user. No separate host `agent` account is required.
 - No POSIX ACLs needed — direct UID match supersedes the earlier ACL-based scheme. See `docs/host-setup.md` § 5 for the security trade-off.
 - Mirrored bind-mount paths — `~/Repositories` on host maps to `/home/agent/Repositories` in container. Paths look identical apart from the home prefix; preserve this.
-- Claude state bind-mount — repo-local `./.claude/` and `./.claude.json` (gitignored, agent-owned) are mounted rw into the container. Session is independent of the host's Claude Code login — each clone/worktree has its own container session.
+- Claude state bind-mount — repo-local `./.claude/` and `./.claude.json` are mounted rw into the container. `.claude/settings.json` and `.claude/mcp-config.json` are **committed**; runtime state (credentials, sessions, plugin cache) is gitignored. Session is independent of the host's Claude Code login — each clone/worktree has its own container session.
 - SSH agent socket forwarding — `$SSH_AUTH_SOCK` is bind-mounted; container never holds its own SSH private keys.
 
-## Skills are baked, pinned
+## Skills are marketplace-installed (repo-side)
 
-Caveman and worktrunk are cloned at image build from upstream GitHub at a pinned commit. Bumping requires a Dockerfile change + image rebuild. Sources:
+Caveman and worktrunk are declared in committed `.claude/settings.json` and fetched from GitHub on first `claude` launch inside the container. No image baking. Sources:
 
 - `https://github.com/JuliusBrussee/caveman.git`
 - `https://github.com/max-sixty/worktrunk.git`
 
-A `SessionStart` hook in the baked `~/.claude/settings.json` activates caveman by default in every fresh `claude` session to reduce token usage.
+Caveman's own plugin registers the `SessionStart` hook that activates caveman mode by default.
+
+**Pinning trade-off:** First launch in a fresh clone fetches HEAD of each marketplace. To pin to a specific commit, run `claude plugin install caveman@<sha> worktrunk@<sha>` after the initial install and commit the resulting `installed_plugins.json` — but that file is currently gitignored (machine-managed). If pinning becomes important, promote it to tracked.
 
 ## Build & run commands
 
-The wrapper script and compose file do not exist yet — they are tracked by Phase B issues. Once they land:
-
 ```bash
+# One-time: initialise repo-local Claude login state
+./bin/agent-sandbox setup
+
 # Build agent image (UID/GID matched to host invoker — wrapper handles it)
 ./bin/agent-sandbox build
 

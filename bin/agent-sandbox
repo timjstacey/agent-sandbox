@@ -12,10 +12,9 @@ case "${1:-}" in
   setup)
     echo "Initialising container-local Claude state..."
 
-    # Container claude state lives inside the repo (gitignored) so each clone
-    # has its own session. Pre-create as the host user so docker bind-mounts
-    # the right kind of inode and ownership matches the in-container UID.
-    install -d -m 0700 "${REPO_DIR}/.claude"
+    # .claude/ is committed (settings.json + mcp-config.json tracked in git).
+    # Only .claude.json (login state) needs pre-creation as the right inode type
+    # before docker bind-mounts it (missing file gets auto-created as a dir).
     if [[ ! -f "${REPO_DIR}/.claude.json" ]]; then
       touch "${REPO_DIR}/.claude.json"
       chmod 0600 "${REPO_DIR}/.claude.json"
@@ -39,7 +38,11 @@ case "${1:-}" in
 
     test -d "${REPO_DIR}/.claude" \
       && echo "claude dir:   OK" \
-      || { echo "claude dir:   FAIL (run setup)"; ok=false; }
+      || { echo "claude dir:   FAIL (git checkout missing .claude/)"; ok=false; }
+
+    test -f "${REPO_DIR}/.claude/settings.json" \
+      && echo "settings:     OK" \
+      || { echo "settings:     FAIL (missing .claude/settings.json — git checkout?)"; ok=false; }
 
     test -w "${REPO_DIR}/.claude.json" \
       && echo "session:      OK" \
@@ -94,7 +97,16 @@ case "${1:-}" in
       fi
     done
 
-    exec docker compose -f "${COMPOSE_FILE}" run --rm agent "$@"
+    # bashrc function injects --mcp-config for interactive shell sessions, but
+    # is not in scope when claude is passed as a subcommand (non-interactive).
+    # Inject the flag explicitly for that path.
+    if [[ "${1:-}" == "claude" ]]; then
+      shift
+      exec docker compose -f "${COMPOSE_FILE}" run --rm agent \
+        claude --mcp-config /home/agent/.claude/mcp-config.json "$@"
+    else
+      exec docker compose -f "${COMPOSE_FILE}" run --rm agent "$@"
+    fi
     ;;
 
 esac

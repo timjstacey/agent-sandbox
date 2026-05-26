@@ -114,58 +114,14 @@ RUN eval "$(fnm env --use-on-cd --shell bash)" \
     && npm install -g typescript @anthropic-ai/claude-code \
     && tsc -v && claude --version
 
-# ─── Layer 9b: claude shim — inject container-only MCP config ────────────────
-# ~/.claude.json is bind-mounted rw from the host, so we must NOT write
-# container-only MCP servers into it. Instead the shim invokes claude with
-# --mcp-config pointing at an image-baked file. The npm-installed claude is
-# renamed to claude.real; the shim takes its place on PATH.
-USER root
-RUN CLAUDE_BIN="$(command -v claude)" \
-    && test -n "${CLAUDE_BIN}" \
-    && mv "${CLAUDE_BIN}" "${CLAUDE_BIN}.real" \
-    && printf '%s\n' \
-       '#!/bin/bash' \
-       'exec "$(dirname "$(readlink -f "$0")")/claude.real" --mcp-config /etc/claude/mcp-config.json "$@"' \
-       > "${CLAUDE_BIN}" \
-    && chmod +x "${CLAUDE_BIN}" \
-    && chown agent:agent "${CLAUDE_BIN}" "${CLAUDE_BIN}.real" \
-    && install -d -o agent -g agent /home/agent/.local/bin \
-    && ln -s "${CLAUDE_BIN}" /home/agent/.local/bin/claude
-USER agent
-
-# Host ~/.claude.json (bind-mounted) records installMethod=native and expects
-# the binary at ~/.local/bin/claude. Prepend that dir to PATH so the symlink
-# above resolves first; the shim's readlink -f then jumps to claude.real in
-# the fnm bin dir, finding claude.real alongside it.
-ENV PATH="/home/agent/.local/bin:${PATH}"
-
-# ─── Layer 10: Clone skills + symlinks (caveman + worktrunk) ─────────────────
-# caveman  pinned @ ef6050c (2026-05-25)
-# worktrunk pinned @ 58168f4 (2026-05-25)
-USER root
-RUN git clone --filter=blob:none --no-tags https://github.com/JuliusBrussee/caveman.git /opt/skills/caveman \
-    && git -C /opt/skills/caveman checkout ef6050c \
-    && git clone --filter=blob:none --no-tags https://github.com/max-sixty/worktrunk.git /opt/skills/worktrunk \
-    && git -C /opt/skills/worktrunk checkout 58168f4 \
-    && chmod -R a+rX /opt/skills \
-    && mkdir -p /home/agent/.claude/plugins/marketplaces \
-    && ln -s /opt/skills/caveman  /home/agent/.claude/plugins/marketplaces/caveman \
-    && ln -s /opt/skills/worktrunk /home/agent/.claude/plugins/marketplaces/worktrunk \
-    && chown -R agent:agent /home/agent/.claude
-
-USER agent
-
-# ─── Layer 11: Bake settings.json (caveman auto-activation + plugins) ─────────
-COPY --chown=agent:agent docker/settings.json /home/agent/.claude/settings.json
-
-# ─── Layer 12: Bake MCP server config (Playwright sidecar) ───────────────────
-# Loaded by the claude shim via --mcp-config so container-only servers stay out
-# of the host-shared ~/.claude.json. Path is fixed; the shim references it.
-USER root
-RUN mkdir -p /etc/claude
-COPY docker/mcp-config.json /etc/claude/mcp-config.json
-RUN chmod 0644 /etc/claude/mcp-config.json
-USER agent
+# ─── Layer 9b: bashrc function — inject --mcp-config from repo-mounted .claude/ ─
+# Bind-mounted .claude/mcp-config.json carries container-only MCP servers so
+# the committed file (not the image) is the source of truth. The function wraps
+# the real claude binary in interactive shells; bin/agent-sandbox injects the
+# flag directly when invoking claude as a subcommand (non-interactive path).
+RUN printf '%s\n' \
+    'claude() { command claude --mcp-config "$HOME/.claude/mcp-config.json" "$@"; }' \
+    >> /home/agent/.bashrc
 
 # ─── Final configuration ─────────────────────────────────────────────────────
 WORKDIR /home/agent/Repositories

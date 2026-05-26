@@ -1,0 +1,10 @@
+{
+  "extraKnownMarketplaces": {
+    "caveman":   { "source": { "source": "github", "repo": "JuliusBrussee/caveman" } },
+    "worktrunk": { "source": { "source": "github", "repo": "max-sixty/worktrunk" } }
+  },
+  "enabledPlugins": {
+    "caveman@caveman":   true,
+    "worktrunk@worktrunk": true
+  }
+}
