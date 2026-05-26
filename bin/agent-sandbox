@@ -163,16 +163,18 @@ EOF
     fi
 
     resolve_gh_token
+    GH_TOKEN_FLAG=()
+    [[ -n "${GH_TOKEN:-}" ]] && GH_TOKEN_FLAG=(-e "GH_TOKEN=${GH_TOKEN}")
 
     # bashrc function injects --mcp-config for interactive shell sessions, but
     # is not in scope when claude is passed as a subcommand (non-interactive).
     # Inject the flag explicitly for that path.
     if [[ "${1:-}" == "claude" ]]; then
       shift
-      exec docker compose -f "${COMPOSE_FILE}" run --rm "${WORKDIR_FLAG[@]}" agent \
+      exec docker compose -f "${COMPOSE_FILE}" run --rm "${GH_TOKEN_FLAG[@]}" "${WORKDIR_FLAG[@]}" agent \
         claude --mcp-config /home/agent/.claude/mcp-config.json "$@"
     else
-      exec docker compose -f "${COMPOSE_FILE}" run --rm "${WORKDIR_FLAG[@]}" agent "$@"
+      exec docker compose -f "${COMPOSE_FILE}" run --rm "${GH_TOKEN_FLAG[@]}" "${WORKDIR_FLAG[@]}" agent "$@"
     fi
     ;;
 
