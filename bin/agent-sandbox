@@ -70,12 +70,29 @@ EOF
     # caveman SessionStart hook fires on first claude launch rather than the
     # second. Requires the image to be built; skip gracefully if not yet done.
     echo "Pre-installing Claude plugins (caveman, worktrunk)..."
-    if docker compose -f "${COMPOSE_FILE}" run --rm --no-deps agent \
-         bash -c 'claude plugin install caveman@caveman && claude plugin install worktrunk@worktrunk'; then
-      echo "plugins:       installed"
-    else
-      echo "Warning: Plugin pre-install failed — re-run setup after './bin/agent-sandbox build'." >&2
-    fi
+    PLUGIN_CACHE="${REPO_DIR}/.claude/plugins/cache"
+    mkdir -p "${PLUGIN_CACHE}"
+    plugin_ok=true
+    for plugin in "caveman:JuliusBrussee/caveman" "worktrunk:max-sixty/worktrunk"; do
+      name="${plugin%%:*}"
+      repo="${plugin##*:}"
+      dest="${PLUGIN_CACHE}/${name}"
+      if [[ -d "${dest}" ]]; then
+        echo "  ${name}: already cached (delete ${dest} to refresh)"
+      else
+        echo "  ${name}: downloading from github.com/${repo}..."
+        tmp="$(mktemp -d)"
+        if curl -fsSL "https://github.com/${repo}/archive/refs/heads/main.tar.gz" \
+             | tar -xz --strip-components=1 -C "${tmp}" 2>/dev/null; then
+          mv "${tmp}" "${dest}"
+        else
+          rm -rf "${tmp}"
+          echo "Warning: ${name} download failed." >&2
+          plugin_ok=false
+        fi
+      fi
+    done
+    ${plugin_ok} && echo "plugins:       installed" || echo "Warning: Plugin pre-install incomplete — plugins will install on first claude launch." >&2
 
     echo "Done. Run './bin/agent-sandbox verify' to confirm."
     ;;
