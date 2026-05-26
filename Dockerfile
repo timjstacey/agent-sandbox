@@ -43,6 +43,24 @@ RUN arch="$(dpkg --print-architecture)" \
     && chmod +x /usr/local/bin/tea \
     && tea --version
 
+# ─── Layer 3b: worktrunk wt CLI (static musl binary) ────────────────────────
+ARG WT_VERSION=0.53.0
+RUN arch="$(dpkg --print-architecture)" \
+    && case "${arch}" in \
+       amd64) wt_arch="x86_64" ;; \
+       arm64) wt_arch="aarch64" ;; \
+       *) echo "Unsupported arch: ${arch}"; exit 1 ;; \
+    esac \
+    && curl -fsSL \
+       "https://github.com/max-sixty/worktrunk/releases/download/v${WT_VERSION}/worktrunk-${wt_arch}-unknown-linux-musl.tar.xz" \
+       -o /tmp/worktrunk.tar.xz \
+    && mkdir -p /tmp/worktrunk-extract \
+    && tar xf /tmp/worktrunk.tar.xz --strip-components 1 -C /tmp/worktrunk-extract \
+    && mv /tmp/worktrunk-extract/wt /tmp/worktrunk-extract/git-wt /usr/local/bin/ \
+    && chmod +x /usr/local/bin/wt /usr/local/bin/git-wt \
+    && rm -rf /tmp/worktrunk* \
+    && wt --version
+
 # ─── Layer 4: agent user ─────────────────────────────────────────────────────
 # UID/GID match the host invoker so bind-mounted files appear owned by them on
 # the host (no sudo needed to edit). Defensive: reuse any pre-existing group/
@@ -114,14 +132,14 @@ RUN eval "$(fnm env --use-on-cd --shell bash)" \
     && npm install -g typescript @anthropic-ai/claude-code \
     && tsc -v && claude --version
 
-# ─── Layer 9b: bashrc function — inject --mcp-config from repo-mounted .claude/ ─
-# Bind-mounted .claude/mcp-config.json carries container-only MCP servers so
-# the committed file (not the image) is the source of truth. The function wraps
-# the real claude binary in interactive shells; bin/agent-sandbox injects the
-# flag directly when invoking claude as a subcommand (non-interactive path).
+# ─── Layer 9b: bashrc setup ──────────────────────────────────────────────────
+# claude(): inject --mcp-config from repo-mounted .claude/ in interactive shells;
+#   bin/agent-sandbox handles the flag for non-interactive subcommand invocations.
+# wt shell install: registers worktrunk shell hook (cd integration) in ~/.bashrc.
 RUN printf '%s\n' \
     'claude() { command claude --mcp-config "$HOME/.claude/mcp-config.json" "$@"; }' \
-    >> /home/agent/.bashrc
+    >> /home/agent/.bashrc \
+    && wt config shell install
 
 # ─── Final configuration ─────────────────────────────────────────────────────
 WORKDIR /home/agent/Repositories
