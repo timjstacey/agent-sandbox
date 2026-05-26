@@ -136,10 +136,13 @@ RUN eval "$(fnm env --use-on-cd --shell bash)" \
 # claude(): inject --mcp-config from repo-mounted .claude/ in interactive shells;
 #   bin/agent-sandbox handles the flag for non-interactive subcommand invocations.
 # wt shell install: registers worktrunk shell hook (cd integration) in ~/.bashrc.
+# mkdir ~/.config/worktrunk: pre-create with agent ownership so the wt-config
+#   bind-mount (compose.yml) lands owned by agent, not root.
 RUN printf '%s\n' \
     'claude() { command claude --mcp-config "$HOME/.claude/mcp-config.json" "$@"; }' \
     >> /home/agent/.bashrc \
-    && wt config shell install --yes bash
+    && wt config shell install --yes bash \
+    && mkdir -p ~/.config/worktrunk
 
 # ─── Final configuration ─────────────────────────────────────────────────────
 WORKDIR /home/agent/Repositories
