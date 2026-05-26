@@ -1,0 +1,12 @@
+worktree-path = "{{ repo_path }}/../{{ branch | sanitize }}"
+
+[list]
+summary = true
+
+[commit.generation]
+command = "CLAUDECODE= MAX_THINKING_TOKENS=0 claude -p --no-session-persistence --model=haiku --tools='' --disable-slash-commands --setting-sources='' --system-prompt=''"
+template-append = """
+Use conventional commits format (feat:, fix:, chore:, refactor:, test:, docs:).
+Ultra-compressed style: drop articles/filler/hedging, fragments OK, subject ≤50 chars.
+Body only when WHY is non-obvious. No bullet lists unless multiple independent changes.
+"""

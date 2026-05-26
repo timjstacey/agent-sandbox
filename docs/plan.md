@@ -249,3 +249,18 @@ End-to-end checks after building:
 - Whether `@anthropic-ai/claude-code` has any native deps that need `build-essential` (verify; pull in only if needed)
 - Outbound network: default unrestricted; user can add `network_mode` or firewall rules later if desired (out of scope for initial build)
 - **Registry choice for CI image push**: GHCR vs Docker Hub vs self-hosted — decide before wiring `.github/workflows/build.yml` login step
+
+## Amendment — Issue #5: repo-side Claude config (2026-05-26)
+
+Supersedes the "Skills delivery" and "MCP config" rows in the decisions table.
+
+**What changed:** Image no longer bakes Claude configuration. Layers 9b (claude shim), 10 (skills clone), 11 (settings.json bake), 12 (mcp-config.json bake) are gone. The image now carries only the runtime (Debian + Node + claude CLI + tooling). All Claude configuration lives in the repo.
+
+**New scheme:**
+- `.claude/settings.json` (committed): `extraKnownMarketplaces` + `enabledPlugins` → caveman and worktrunk fetched from GitHub on first `claude` launch.
+- `.claude/mcp-config.json` (committed): Playwright SSE entry, bind-mounted into container via the existing `.claude:/home/agent/.claude` mount.
+- Dockerfile Layer 9b replaced with a `bashrc` `claude()` function that forwards `--mcp-config "$HOME/.claude/mcp-config.json"` in interactive shells.
+- `bin/agent-sandbox claude` injects `--mcp-config /home/agent/.claude/mcp-config.json` directly (bashrc not in scope for non-interactive docker exec paths).
+- `.gitignore` updated to granular per-file ignores inside `.claude/`; `settings.json` and `mcp-config.json` are now tracked.
+
+**Trade-offs:** First launch fetches plugin HEAD (not a pinned commit). Acceptable — network already required for npm/apt/SSH. To pin later: `claude plugin install caveman@<sha>` and promote `installed_plugins.json` to tracked.
