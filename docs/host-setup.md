@@ -51,7 +51,7 @@ A marker file (`~/.agent-sandbox-provisioned`) gates re-runs. If provisioning fa
 **Volume cleanup:** To force re-provisioning, remove the named volume:
 
 ```bash
-docker volume rm agent-sandbox-${USER}_agent-home
+docker volume rm "agent-sandbox-$(id -un)_agent-home"
 ```
 
 ---

@@ -29,14 +29,19 @@ if [ ! -f "$HOME_DIR/.skel-agent-seeded" ]; then
   touch "$HOME_DIR/.skel-agent-seeded"
 fi
 
-# Ensure ownership (named volume may start root-owned)
-chown -R "$HOST_UID:$HOST_GID" "$HOME_DIR"
+# Ensure ownership — only recurse if the volume root is still root-owned (first run).
+# Skipping on subsequent starts avoids a multi-second chown over the provisioned toolchain.
+if [ "$(stat -c %u "$HOME_DIR")" != "$HOST_UID" ]; then
+  chown -R "$HOST_UID:$HOST_GID" "$HOME_DIR"
+fi
 
 # First-run provisioning (skipped in CI via SKIP_PROVISION=1)
 MARKER="$HOME_DIR/.agent-sandbox-provisioned"
 if [ ! -f "$MARKER" ] && [ "${SKIP_PROVISION:-0}" != "1" ]; then
   echo "[entrypoint] first-run provisioning (Node ${PROVISION_NODE_VERSION:-22} + pnpm + bun + claude)..."
-  gosu "$RESOLVED_USER" bash -lc "
+  # Use non-login bash so .bashrc is not sourced — fnm env in .bashrc would fail before
+  # any Node version is installed. Pass HOME explicitly; fnm/wt are on /usr/local/bin.
+  gosu "$RESOLVED_USER" env HOME="$HOME_DIR" bash -c "
     set -euo pipefail
     export FNM_DIR=\"\$HOME/.local/share/fnm\"
     mkdir -p \"\$FNM_DIR\"
@@ -48,8 +53,7 @@ if [ ! -f "$MARKER" ] && [ "${SKIP_PROVISION:-0}" != "1" ]; then
     curl -fsSL https://bun.sh/install | bash
     wt config shell install --yes bash
   "
-  touch "$MARKER"
-  chown "$HOST_UID:$HOST_GID" "$MARKER"
+  gosu "$RESOLVED_USER" touch "$MARKER"
 fi
 
 # Warn once per session if gh is not authenticated
