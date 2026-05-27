@@ -23,7 +23,12 @@ jobs:
           ignore: DL3008
 
       - name: compose validate
-        run: docker compose -f compose.yml config --quiet
+        run: |
+          HOST_USER="$(id -un)"
+          HOST_UID="$(id -u)"
+          HOST_GID="$(id -g)"
+          export HOST_USER HOST_UID HOST_GID
+          docker compose -f compose.yml config --quiet
 
   build-and-test:
     runs-on: ubuntu-latest
@@ -41,60 +46,43 @@ jobs:
           push: false
           load: true
           tags: agent-sandbox:pr
-          build-args: |
-            AGENT_UID=1500
-            AGENT_GID=1500
           cache-from: type=registry,ref=ghcr.io/timjstacey/agent-sandbox:buildcache
 
-      - name: Smoke - tool versions
+      - name: Smoke - static tool versions
         run: |
-          docker run --rm agent-sandbox:pr bash -c '
-            set -euxo pipefail
-            node -v
-            npm -v
-            pnpm -v
-            bun -v
-            tsc -v
-            claude --version
-            gh --version
-            tea --version
-            wt --version
-            git --version
-          '
+          docker run --rm \
+            -e HOST_USER="$(id -un)" \
+            -e HOST_UID="$(id -u)" \
+            -e HOST_GID="$(id -g)" \
+            -e SKIP_PROVISION=1 \
+            agent-sandbox:pr bash -c '
+              set -euxo pipefail
+              fnm --version
+              gh --version
+              wt --version
+              git --version
+            '
 
       - name: Smoke - user/UID identity
         run: |
-          docker run --rm agent-sandbox:pr bash -c '
-            set -euxo pipefail
-            [ "$(id -un)" = "agent" ]
-            [ "$(id -u)" = "1500" ]
-            [ "$(id -g)" = "1500" ]
-            [ "$HOME" = "/home/agent" ]
-            [ "$(pwd)" = "/home/agent/Repositories" ]
-          '
+          docker run --rm \
+            -e HOST_USER="$(id -un)" \
+            -e HOST_UID="$(id -u)" \
+            -e HOST_GID="$(id -g)" \
+            -e SKIP_PROVISION=1 \
+            agent-sandbox:pr bash -c '
+              set -euxo pipefail
+              [ "$(id -un)" = "$HOST_USER" ]
+              [ "$(id -u)" = "$HOST_UID" ]
+              [ "$(id -g)" = "$HOST_GID" ]
+              [ "$HOME" = "/home/$(id -un)" ]
+            '
 
       - name: Smoke - bashrc claude() shim
         run: |
-          docker run --rm agent-sandbox:pr bash -ic 'type claude | grep -q -- "--mcp-config"'
-
-      - name: Build image (UID variation)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: false
-          load: true
-          tags: agent-sandbox:pr-uid2000
-          build-args: |
-            AGENT_UID=2000
-            AGENT_GID=2000
-          cache-from: type=registry,ref=ghcr.io/timjstacey/agent-sandbox:buildcache
-
-      - name: Smoke - UID variation identity
-        run: |
-          docker run --rm agent-sandbox:pr-uid2000 bash -c '
-            set -euxo pipefail
-            [ "$(id -u)" = "2000" ]
-            [ "$(id -g)" = "2000" ]
-          '
+          docker run --rm \
+            -e HOST_USER="$(id -un)" \
+            -e HOST_UID="$(id -u)" \
+            -e HOST_GID="$(id -g)" \
+            -e SKIP_PROVISION=1 \
+            agent-sandbox:pr bash -ic 'type claude | grep -q -- "--mcp-config"'

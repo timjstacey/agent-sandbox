@@ -41,7 +41,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "bash \"/home/agent/.claude/combined-statusline.sh\""
+    "command": "bash \"$HOME/.claude/combined-statusline.sh\""
   },
   "enabledPlugins": {
     "caveman@caveman": true,

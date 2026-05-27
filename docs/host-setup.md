@@ -4,15 +4,13 @@ One-time preparation steps to run the agent container on your machine. Follow th
 
 ---
 
-## 1. UID matching, not a separate host user
+## 1. Zero host setup required for user identity
 
-The container's in-image user is called `agent`, but its UID/GID are set at build time to match the host user that builds the image. This means:
+The container user is created at runtime by the entrypoint from the invoking host user's identity. `bin/agent-sandbox` derives `HOST_USER`/`HOST_UID`/`HOST_GID` from `id -un`/`id -u`/`id -g` and passes them to the container automatically.
 
-- Files written by the container appear on the host owned by **you**, not by a separate `agent` account — no `sudo` needed to edit or delete them.
-- The wrapper script (`bin/agent-sandbox build`) automatically passes `--build-arg AGENT_UID=$(id -u) AGENT_GID=$(id -g)`.
-- No separate host user, no POSIX ACLs to manage, no group memberships to add.
-
-Earlier versions of this project required a dedicated host `agent` user plus POSIX ACLs on every shared path. That added a privilege barrier between the container UID and your home directory, but at the cost of constant `sudo`-to-edit friction and ACL drift whenever host tools rewrote files atomically. The UID-match approach trades that barrier for ergonomics; see *Security trade-off* below.
+- Files written by the container appear on the host owned by **you** — no `sudo` needed.
+- No separate host `agent` user, no build-time UID baking, no POSIX ACLs.
+- The image is portable across host users and machines — no rebuild when your UID changes.
 
 ---
 
@@ -22,9 +20,7 @@ Earlier versions of this project required a dedicated host `agent` user plus POS
 ./bin/agent-sandbox build
 ```
 
-The script resolves `id -u` and `id -g` for the invoking user and passes them as `--build-arg` values. The Dockerfile defaults (`AGENT_UID=1000`, `AGENT_GID=1000`) are only a fallback for builds outside the wrapper.
-
-If you later move the repo to a host where your UID differs, rebuild.
+No build args needed. The Dockerfile produces a single portable image; user identity is injected at `docker compose run` time.
 
 ---
 
@@ -34,51 +30,85 @@ If you later move the repo to a host where your UID differs, rebuild.
 ./bin/agent-sandbox setup
 ```
 
-Creates a repo-local `./.claude/` directory and `./.claude.json` file (both gitignored) owned by the host user. The container's Claude session lives there and is independent of your host's Claude Code login — first container run prompts `/login` once, and credentials persist across runs.
-
-The script also warns if `~/.gitconfig`, `~/.config/gh`, or `~/.config/tea` are missing. Create them (or run `gh auth login` / `tea login`) before launching the container.
+Creates the repo-local `./.claude/` directory and `./.claude.json` file (both gitignored) owned by the host user. The container's Claude session lives there and is independent of your host's Claude Code login — first container run prompts `/login` once and credentials persist across runs.
 
 No `sudo` is required.
 
 ---
 
-## 4. Verify the setup
+## 4. First-run provisioning
+
+On the first `./bin/agent-sandbox` invocation, the entrypoint provisions the per-user toolchain (Node, pnpm, bun, Claude Code, TypeScript) into a named Docker volume that backs `$HOME`. This takes **60–120 seconds** on first run; subsequent runs are instant.
+
+Progress is printed as:
+
+```
+[entrypoint] first-run provisioning (Node 22 + pnpm + bun + claude)...
+```
+
+A marker file (`~/.agent-sandbox-provisioned`) gates re-runs. If provisioning fails mid-way (e.g. network error), the marker is not written and the next run retries from scratch.
+
+**Volume cleanup:** To force re-provisioning, remove the named volume:
+
+```bash
+docker volume rm "agent-sandbox-$(id -un)_agent-home"
+```
+
+---
+
+## 5. Verify the setup
 
 ```bash
 ./bin/agent-sandbox verify
 ```
 
-Prints `OK` or `FAIL` for each required path and exits non-zero if anything fails. Re-run `./bin/agent-sandbox setup`, or address the failing item, then verify again.
+Prints `OK` or `FAIL` for each required path. Re-run `./bin/agent-sandbox setup` or address the failing item, then verify again.
 
 ---
 
-## 5. Security trade-off
+## 6. GitHub authentication
 
-Running the container as your host UID means:
+**Preferred path (host login):** Run `gh auth login` on the host before starting the container. Host `gh` stores the OAuth token in the system keyring (libsecret). `bin/agent-sandbox` extracts it via `gh auth token` and injects it as `GH_TOKEN` into the container — in-container `gh` picks it up automatically without any keyring service.
 
-- **You lose:** UID-based isolation between the container and your home directory. If a process inside the container escapes its bind mounts (via a symlink-traversal bug or a future bind-mount you add that points at sensitive data), it acts as your UID and can read/write anything you can.
-- **You keep:** Docker namespace isolation (the container still cannot see host processes, the host network, or unmounted filesystems), no-sudo-in-container (the in-image `agent` user has no `sudoers` entry), SSH-agent forwarding (private keys never enter the container), and a minimal mounted surface (only `~/Repositories`, three config dirs, and the SSH socket are visible inside).
+**Fallback path (in-container login):** Run `gh auth login` inside the container. This works but stores the token **plaintext** in `~/.config/gh/hosts.yml` (no keyring service in the container). The file is `0600` and lives under a bind mount, so the token persists back to the host config directory. Acceptable for dev sandbox use; prefer host login for higher-sensitivity tokens.
 
-The threat model this configuration is designed against: untrusted code the agent executes inside `~/Repositories` (npm installs, build scripts, test runners). Such code already runs with your privileges in the host's normal workflow; running it inside the container narrows what it can reach to the mounted paths, even though it runs as your UID.
-
-If you need a stronger boundary — e.g. the agent will run wholly untrusted code with broader filesystem access — enable Docker's `userns-remap` in `/etc/docker/daemon.json` to transparently shift the container's UID to an unprivileged host UID without changing the in-container view.
+If `~/.config/gh` doesn't exist on the host, `bin/agent-sandbox` creates an empty directory automatically and prints a note — the container still starts.
 
 ---
 
-## 6. SSH host keys for git remotes
+## 7. Multi-user isolation
+
+On a shared Docker daemon, each host user gets an isolated named volume via `COMPOSE_PROJECT_NAME=agent-sandbox-${HOST_USER}`. Different users → different project → different `agent-home` volume → no cross-contamination.
+
+---
+
+## 8. SSH host keys for git remotes
 
 The container has no per-user `~/.ssh` directory. To prevent `git push` and `gh pr create` from failing with `Host key verification failed` on the first SSH connection, the image bakes public host keys for the git remotes this project uses into `/etc/ssh/ssh_known_hosts` at build time.
 
 Currently seeded: `github.com`, `gitea.com`, `gitea.sillysamoyed.com`.
 
-If a remote rotates its host key, or you add a new remote (e.g. a self-hosted Gitea or a different forge), edit the `ssh-keyscan` line in the `Dockerfile` (Layer 2b) and rebuild with `./bin/agent-sandbox build`.
+If a remote rotates its host key, or you add a new remote, edit the `ssh-keyscan` line in the `Dockerfile` (Layer 2b) and rebuild with `./bin/agent-sandbox build`.
 
 ---
 
-## 7. Note on Claude Code sessions
+## 9. Security trade-off
 
-The container has its own Claude Code session, persisted in the repo-local `./.claude/` directory (gitignored). It is **independent** of your host's Claude Code login — refreshes and `/login` events on either side do not affect the other. Each clone or worktree of this repository has its own container session.
+Running the container as your host UID means:
 
-Earlier versions of this project shared `~/.claude/` and `~/.claude.json` between host and container via POSIX ACLs. That sharing was removed because host Claude Code rewrites `~/.claude.json` atomically (write tempfile + rename), which strips any ACL entry on each rewrite and silently broke container access. Repo-local state avoids that entire failure mode.
+- **You lose:** UID-based isolation between the container and your home directory. If a process inside the container escapes its bind mounts, it acts as your UID.
+- **You keep:** Docker namespace isolation, SSH-agent forwarding (private keys never enter the container), and a minimal mounted surface (only `~/Repositories`, the Claude state dir, the gh config dir, and the SSH socket are visible inside).
 
-If you want to wipe the container's session (e.g. switch accounts), delete `./.claude/` and `./.claude.json` then re-run `./bin/agent-sandbox setup`.
+The threat model this configuration is designed against: untrusted code the agent executes inside `~/Repositories` (npm installs, build scripts, test runners). Such code already runs with your privileges in the host's normal workflow; running it inside the container narrows what it can reach to the mounted paths.
+
+If you need a stronger boundary, enable Docker's `userns-remap` in `/etc/docker/daemon.json`.
+
+---
+
+## 10. Note on Claude Code sessions
+
+The container has its own Claude Code session, persisted in the repo-local `./.claude/` directory (gitignored). It is **independent** of your host's Claude Code login.
+
+To wipe the container's session (e.g. switch accounts), delete `./.claude/` and `./.claude.json` then re-run `./bin/agent-sandbox setup`.
+
+**Note:** After switching to runtime user injection, existing `.claude.json` files keyed by `/home/agent/...` paths are stale. Delete and re-run `/login` once inside the container, or accept the dead keys (claude ignores unrecognised entries).
