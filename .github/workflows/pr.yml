@@ -24,9 +24,10 @@ jobs:
 
       - name: compose validate
         run: |
-          export HOST_USER="$(id -un)"
-          export HOST_UID="$(id -u)"
-          export HOST_GID="$(id -g)"
+          HOST_USER="$(id -un)"
+          HOST_UID="$(id -u)"
+          HOST_GID="$(id -g)"
+          export HOST_USER HOST_UID HOST_GID
           docker compose -f compose.yml config --quiet
 
   build-and-test:
