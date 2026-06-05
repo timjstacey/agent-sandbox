@@ -45,8 +45,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            AGENT_UID=1500
-            AGENT_GID=1500
           cache-from: type=registry,ref=ghcr.io/timjstacey/agent-sandbox:buildcache
           cache-to: type=registry,ref=ghcr.io/timjstacey/agent-sandbox:buildcache,mode=max

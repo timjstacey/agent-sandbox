@@ -20,7 +20,7 @@ Do not re-litigate these without explicit user direction:
 | Container-only MCP | Committed `.claude/mcp-config.json` bind-mounted into container. Interactive shells pick it up via a bashrc `claude()` function; `./bin/agent-sandbox claude` injects `--mcp-config` directly (non-interactive path). No binary shim, no `/etc/claude/`. |
 | Skills | Declared in committed `.claude/settings.json` via `extraKnownMarketplaces` + `enabledPlugins`; fetched from GitHub on first `claude` launch. No image baking — bumping = edit settings.json, delete plugin cache, no rebuild. |
 | Container user | **Run-time-injected** via entrypoint from `HOST_USER`/`HOST_UID`/`HOST_GID` env (set by `bin/agent-sandbox`). No build args. Container starts as root (`user: "0:0"`); entrypoint creates matching user and drops via `gosu`. Bind-mounted files appear owned by the host user. |
-| Bind-mount layout | Mirror host paths (`-v ~/Repositories:/home/${HOST_USER}/Repositories`). Container `$HOME` = `/home/${HOST_USER}`, identical to host. |
+| Bind-mount layout | Mirror host paths. The host projects dir is chosen at `setup` time (prompted, default `~/Repositories`) and written to gitignored `.env` as `PROJECTS_DIR` + `PROJECTS_BASENAME`; compose mounts `${PROJECTS_DIR}:/home/${HOST_USER}/${PROJECTS_BASENAME}` so container ↔ host paths match. Container `$HOME` = `/home/${HOST_USER}`, identical to host. |
 | Git push creds | Forward host SSH agent socket (`$SSH_AUTH_SOCK`), never copy keys. Public host keys for git remotes (`github.com`, `gitea.com`, `gitea.sillysamoyed.com`) are baked into `/etc/ssh/ssh_known_hosts` at image build time — rebuild to rotate or add hosts. |
 | Toolchain provisioning | `fnm`, `gh`, `wt`, `gosu` baked into image (static binaries / apt). Node + pnpm + bun + claude + typescript provisioned per-user on **first container run** into named volume `agent-home`. Marker file `~/.agent-sandbox-provisioned` gates re-runs. |
 | gh auth | Host login preferred — gh stores in keyring, `bin/agent-sandbox` injects `GH_TOKEN` env. Host-not-logged-in is non-fatal: wrapper creates empty `~/.config/gh` dir, container can run `gh auth login` inline (plaintext, persisted via bind mount). |
@@ -47,8 +47,9 @@ These exist because the container exists to bridge an isolated env to the host. 
 
 - `HOST_USER`/`HOST_UID`/`HOST_GID` env passthrough — set by `bin/agent-sandbox` from `id -un`/`id -u`/`id -g`, consumed by entrypoint to create matching user at run time. No build args, no separate host account.
 - `COMPOSE_PROJECT_NAME=agent-sandbox-${HOST_USER}` — isolates named volumes per host user on shared Docker daemons.
-- Mirrored bind-mount paths — `~/Repositories` on host maps to `/home/${HOST_USER}/Repositories` in container. Paths look identical; preserve this.
-- Claude state bind-mount — repo-local `./.claude/` and `./.claude.json` are mounted rw into the container. `.claude/settings.json` and `.claude/mcp-config.json` are **committed**; runtime state (credentials, sessions, plugin cache) is gitignored. Session is independent of the host's Claude Code login — each clone/worktree has its own container session.
+- Mirrored bind-mount paths — the host projects dir (`PROJECTS_DIR` from `.env`, default `~/Repositories`) maps to `/home/${HOST_USER}/${PROJECTS_BASENAME}` in container. Paths look identical; preserve this.
+- Claude state bind-mount — repo-local `./.claude/` and `./.claude.json` are mounted rw into the container. `.claude/settings.json` and `.claude/mcp-config.json` are **committed**; runtime state (credentials, sessions, plugin cache) is gitignored. Session is independent of the host's Claude Code login — each clone/worktree has its own container session. Committed `settings.json` also carries a `permissions.deny` list (blocks the agent from reading `.env*`, `*.pem`, `*.key`, `.ssh/**`, `.aws/**`, secrets/credentials dirs, compose files) plus `defaultMode: auto`, `effortLevel: high`, and `skipAutoPermissionPrompt`.
+- Worktrunk config bind-mount — `./docker/wt-config.toml` is mounted read-write at `~/.config/worktrunk/config.toml` so in-container `wt` shares the project's worktrunk config.
 - SSH agent socket forwarding — `$SSH_AUTH_SOCK` is bind-mounted; container never holds its own SSH private keys.
 - `GH_TOKEN` injection — `bin/agent-sandbox` calls `gh auth token` on the host to extract the OAuth token from the system keyring (where host `gh` stores it) and exports it as `GH_TOKEN`. Compose passes it into the agent container; `gh` inside the container picks it up automatically. If host `gh` is absent or unauthenticated, a warning is printed and the container still starts — `gh` inside will be unauthenticated. Token is never written to disk inside the container; each `docker compose run` invocation gets a fresh env copy.
 
@@ -61,13 +62,29 @@ Caveman and worktrunk are declared in committed `.claude/settings.json` and fetc
 
 Caveman's own plugin registers the `SessionStart` hook that activates caveman mode by default.
 
-**Pinning trade-off:** First launch in a fresh clone fetches HEAD of each marketplace. To pin to a specific commit, run `claude plugin install caveman@<sha> worktrunk@<sha>` after the initial install and commit the resulting `installed_plugins.json` — but that file is currently gitignored (machine-managed). If pinning becomes important, promote it to tracked.
+`./bin/agent-sandbox setup` pre-fetches both plugins (tarball of each repo's `main` branch) into the gitignored `.claude/plugins/cache/` so the caveman `SessionStart` hook fires on the first `claude` launch. If `setup` is skipped (or the cache is deleted), `claude` fetches HEAD of each marketplace on first launch instead.
+
+**Pinning trade-off:** Both paths track `main`/HEAD, not a pinned commit. To pin, run `claude plugin install caveman@<sha> worktrunk@<sha>` after the initial install and commit the resulting `installed_plugins.json` — but that file is currently gitignored (machine-managed). If pinning becomes important, promote it to tracked.
+
+## CI
+
+Two GitHub Actions workflows under `.github/workflows/`:
+
+- **`pr.yml`** (on PR to `main`) — `lint` job runs actionlint, hadolint (`Dockerfile`, ignoring `DL3008`), and `docker compose config --quiet`. `build-and-test` job builds the image (`load`, no push) and runs three smoke tests under `SKIP_PROVISION=1`: static tool versions (`fnm`/`gh`/`wt`/`git`), user/UID identity match, and the bashrc `claude()` `--mcp-config` shim.
+- **`build.yml`** (on push to `main`, `v*` tags, manual) — builds `linux/amd64` and pushes to GHCR `ghcr.io/timjstacey/agent-sandbox` with `latest` / semver / `sha-` tags. Uses a registry build cache (`:buildcache`).
+
+`SKIP_PROVISION=1` (consumed by `docker/entrypoint.sh`) skips first-run per-user provisioning so CI tests only the baked-in static layers.
 
 ## Build & run commands
 
 ```bash
-# One-time: initialise repo-local Claude login state
+# One-time: prompt for projects dir → write .env, pre-create .claude.json,
+# and pre-install caveman + worktrunk plugins into .claude/plugins/cache/
+# (so the caveman SessionStart hook fires on the first claude launch, not the second)
 ./bin/agent-sandbox setup
+
+# Sanity-check setup (claude state, settings.json, plugins, gitconfig, repos writable)
+./bin/agent-sandbox verify
 
 # Build agent image (portable — no UID baking)
 ./bin/agent-sandbox build
@@ -76,13 +93,19 @@ Caveman's own plugin registers the `SessionStart` hook that activates caveman mo
 docker compose up -d playwright-mcp
 ./bin/agent-sandbox                       # drops into bash inside container
 ./bin/agent-sandbox claude                # launches Claude Code directly
+
+# AGENT_WORKDIR=<path> sets the container working directory for either invocation.
 ```
 
-## Open items tracked separately
+## Open items
 
-See `docs/plan.md` → "Open items to confirm during implementation":
+Resolved since `docs/plan.md` was written:
 
-- Exact Playwright MCP image tag and transport (SSE port vs stdio)
-- Whether `@anthropic-ai/claude-code` needs `build-essential` for native deps
-- Outbound network policy (default: unrestricted)
-- CI image registry (GHCR vs Docker Hub vs self-hosted Gitea registry) — blocks the CI workflow issue
+- **Playwright MCP transport** — SSE over the internal network; sidecar runs `--host 0.0.0.0 --port 8931`, agent connects at `http://playwright-mcp:8931/sse` (see `.claude/mcp-config.json`). Image tag still `:latest` — compose carries a TODO to pin a digest before production.
+- **CI image registry** — GHCR (`ghcr.io/timjstacey/agent-sandbox`), wired up in `.github/workflows/build.yml`.
+- **`build-essential`** — not needed; `@anthropic-ai/claude-code` provisions via `npm i -g` at first run with no native build step.
+
+Still open (see `docs/plan.md` → "Open items to confirm during implementation"):
+
+- Pin the Playwright MCP image to an immutable tag/digest.
+- Outbound network policy (default: unrestricted).
