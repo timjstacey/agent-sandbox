@@ -36,7 +36,7 @@ Do not re-litigate these without explicit user direction:
 
 ## Workflow conventions
 
-- **One feature per branch / worktree.** Branch naming: `feat/<topic>`, `fix/<topic>`, `docs/<topic>`.
+- **One feature per branch / worktree.** Branch naming: `feat/<topic>`, `fix/<topic>`, `docs/<topic>`. This is a bare/worktrunk repo: never start work with `git checkout -b` or `git branch` — always `wt switch -c <branch>` (or `wt switch <branch>` for an existing branch).
 - **Issues drive work.** Each scoped task is a GitHub issue against `timjstacey/agent-sandbox` (created via `gh issue create`). When implementing, open a PR with `gh pr create` and reference the issue.
 - **Scope discipline.** Don't expand beyond what the issue asks. Cross-file refactors require their own issue.
 - **Commit messages.** Conventional Commits style; the worktrunk LLM commit generator is configured globally.
