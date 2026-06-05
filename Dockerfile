@@ -34,7 +34,7 @@ RUN mkdir -p /etc/apt/keyrings \
 # this project pushes to. Rebuild the image to pick up key rotations or to
 # add new hosts.
 RUN ssh-keyscan -t rsa,ecdsa,ed25519 \
-        github.com gitea.com gitea.sillysamoyed.com \
+        github.com \
         > /etc/ssh/ssh_known_hosts \
     && chmod 0644 /etc/ssh/ssh_known_hosts
 

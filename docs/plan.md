@@ -19,14 +19,13 @@ Goals:
 | Playwright MCP | Sidecar container (Microsoft's `mcr.microsoft.com/playwright/mcp` or equivalent), connected over compose network |
 | Claude Code auth | Container-local: bind-mount repo-relative `./.claude/` and `./.claude.json` (gitignored). Separate session from host login (first run does `/login` once and persists). Earlier designs shared host `~/.claude*` directly; abandoned because host claude rewrites those files atomically and strips the agent's POSIX ACL |
 | Skills delivery | Baked at build via `git clone` (pinned commits); caveman skill auto-activated at session start to reduce token usage |
-| `tea` CLI | Gitea `tea` (https://gitea.com/gitea/tea) |
 | Container user | Non-root `agent` inside the image, UID/GID via `--build-arg` matching the **host invoker** (`id -u`/`id -g`). No separate host `agent` account, no POSIX ACLs. (Superseded the earlier dedicated-host-user + ACL scheme — see § "Host one-time setup" amendment below) |
 | Bind mount layout | Mirror host paths (`-v ~/Repositories:/home/agent/Repositories`) |
 | Git push creds | Forward host SSH agent socket (`$SSH_AUTH_SOCK`) |
 | Node | fnm baked in, default = latest LTS (Node 22 at time of writing) |
 | pnpm + bun | Official upstream installers |
 | Entrypoint | `bash` shell, `claude` on PATH; user invokes interactively |
-| gh + tea auth | Bind mount host `~/.config/gh` and `~/.config/tea` (read-write) |
+| gh auth | Bind mount host `~/.config/gh` (read-write) |
 | Git identity | Bind mount host `~/.gitconfig` read-only |
 | Distribution UX | Host wrapper script (`agent-sandbox`) wrapping `docker compose run` |
 | Skill repo sources | `https://github.com/JuliusBrussee/caveman.git`, `https://github.com/max-sixty/worktrunk.git` |
@@ -61,10 +60,9 @@ Single-stage, `debian:trixie-slim` base. Multi-stage only if image size becomes 
 Build args: `AGENT_UID`, `AGENT_GID` (defaults 1500/1500).
 
 Layers (ordered for cache stability — slow-changing first):
-1. `apt-get install`: `ca-certificates curl git openssh-client gnupg jq xz-utils acl bash-completion` (and any libs `tea`/`gh` need)
+1. `apt-get install`: `ca-certificates curl git openssh-client gnupg jq xz-utils acl bash-completion` (and any libs `gh` needs)
 2. Install `gh` from official apt repo or static release tarball
-3. Install Gitea `tea` from GitHub release (static Go binary → `/usr/local/bin/tea`)
-4. Create `agent` user with passed UID/GID, `/home/agent` home, bash shell
+3. Create `agent` user with passed UID/GID, `/home/agent` home, bash shell
 5. Switch to `USER agent`
 6. Install fnm (`curl -fsSL https://fnm.vercel.app/install | bash`)
 7. Use fnm to install latest LTS and set default; add fnm init to `~/.bashrc`
@@ -90,7 +88,6 @@ Two services on shared internal network:
     - `./.claude.json:/home/agent/.claude.json` (rw, repo-local, gitignored)
     - `${HOME}/.gitconfig:/home/agent/.gitconfig:ro`
     - `${HOME}/.config/gh:/home/agent/.config/gh:rw`
-    - `${HOME}/.config/tea:/home/agent/.config/tea:rw`
     - `${SSH_AUTH_SOCK}:/ssh-agent` + `SSH_AUTH_SOCK=/ssh-agent`
   - `tty: true`, `stdin_open: true`
   - `depends_on: [playwright-mcp]` (optional; agent works without it)
@@ -122,7 +119,7 @@ Argument-less invocation = interactive shell. With args = exec command.
 **Historical (superseded) — original scheme used a dedicated host `agent` user plus POSIX ACLs:**
 
 - Create `agent` user: `sudo useradd -r -m -s /usr/sbin/nologin agent`; lock with `sudo usermod -L agent`
-- `setfacl -R -m u:agent:rwX ~/Repositories` (and default ACL); `setfacl -m u:agent:r ~/.gitconfig`; ACLs on `~/.config/gh`, `~/.config/tea`
+- `setfacl -R -m u:agent:rwX ~/Repositories` (and default ACL); `setfacl -m u:agent:r ~/.gitconfig`; ACLs on `~/.config/gh`
 - Pass `id -u agent`/`id -g agent` as build args
 
 The ACL scheme worked but added constant `sudo`-to-edit friction (files in `~/Repositories` were owned by `agent:agent`) and suffered ACL drift whenever host tools rewrote files atomically. UID match trades the privilege barrier between container UID and host home for ergonomics; documented as a deliberate trade-off, not a regression.
@@ -171,14 +168,14 @@ Sketch:
 |---|---|---|
 | GHCR (`ghcr.io/<user>/agent-sandbox`) | Free for public, integrates with GitHub Actions via built-in `GITHUB_TOKEN`, no extra signup | Tied to GitHub account |
 | Docker Hub | Most familiar, default for `docker pull` | Rate limits on free tier, extra account setup |
-| Self-hosted (Gitea Container Registry, etc.) | Full control, matches "self-hosted ethos" given Gitea tea CLI choice | Requires running a registry |
+| Self-hosted (a private container registry, etc.) | Full control, matches a "self-hosted ethos" | Requires running a registry |
 
 Recommendation when ready to decide: **GHCR** for simplicity unless self-hosting is desired.
 
 ## Repository topology
 
 - `/home/tim/Repositories/agent-sandbox` is a **bare** repository (no working tree).
-- Remote `origin` = `git@github.com:timjstacey/agent-sandbox.git` (GitHub). Plan originally targeted self-hosted Gitea; live remote is GitHub.
+- Remote `origin` = `git@github.com:timjstacey/agent-sandbox.git` (GitHub).
 - Work happens in worktrees managed by `wt` (worktrunk). Never edit inside the bare repo dir directly.
 - A stray `CLAUDE.md` currently sits in the bare-repo root (untracked, created by `/init` before the bare nature was known). Delete it as part of cleanup.
 
@@ -235,7 +232,7 @@ End-to-end checks after building:
 4. **Mounts work**: inside container, `ls ~/Repositories` shows host repos; `touch ~/Repositories/.agent-write-test` succeeds and shows `agent` owner on host (via ACL inheritance)
 5. **Git identity**: `git config user.name` returns host's name
 6. **SSH**: `ssh -T git@github.com` succeeds (via forwarded agent)
-7. **gh + tea auth**: `gh auth status` and `tea logins list` show authenticated state
+7. **gh auth**: `gh auth status` shows authenticated state
 8. **Claude Code auth**: `claude` launches, no re-login prompt, OAuth credentials present
 9. **Node + pkg mgrs**: `node -v` (LTS), `pnpm -v`, `bun -v`, `tsc -v` all succeed
 10. **Skills loaded**: `claude` shows caveman + worktrunk in `/skills` list

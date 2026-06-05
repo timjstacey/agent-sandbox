@@ -6,7 +6,7 @@ A Dockerized Claude Code sandbox. Runs Claude Code and supporting dev tooling in
 
 - Docker with the Compose plugin (`docker compose version` should work)
 - SSH agent running on the host (`$SSH_AUTH_SOCK` set)
-- `gh` and `tea` authenticated on the host (`gh auth login`, `tea login`) — their config dirs are bind-mounted into the container
+- `gh` authenticated on the host (`gh auth login`) — its config dir is bind-mounted into the container
 
 See [docs/host-setup.md](docs/host-setup.md) for the full one-time setup walkthrough, including the security trade-off of UID-matching.
 
@@ -35,7 +35,6 @@ cd agent-sandbox
 |---|---|
 | Base | `debian:trixie-slim` |
 | `gh` | GitHub CLI |
-| `tea` | Gitea CLI |
 | `fnm` + Node.js | fnm with Node.js LTS (v22) as default |
 | `pnpm`, `bun` | Installed via their official upstream scripts |
 | `typescript` | `tsc` available globally |
