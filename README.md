@@ -6,7 +6,7 @@ A Dockerized Claude Code sandbox. Runs Claude Code and supporting dev tooling in
 
 - Docker with the Compose plugin (`docker compose version` should work)
 - SSH agent running on the host (`$SSH_AUTH_SOCK` set)
-- `gh` authenticated on the host (`gh auth login`) — its config dir is bind-mounted into the container
+- GitHub auth happens **inside** the container — run `gh auth login` on first use; the token persists in a repo-local, gitignored config dir (no host `gh` login required)
 
 See [docs/host-setup.md](docs/host-setup.md) for the full one-time setup walkthrough, including the security trade-off of UID-matching.
 

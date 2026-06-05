@@ -6,3 +6,7 @@
 !/.claude/settings.json
 !/.claude/mcp-config.json
 !/.claude/combined-statusline.sh
+
+# Container-local gh auth — bind-mounted dir holding the session token
+# (plaintext hosts.yml, machine/session state). Created by setup.
+/.config/gh/
