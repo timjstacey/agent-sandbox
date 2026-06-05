@@ -101,7 +101,9 @@ Running the container as your host UID means:
 
 The threat model this configuration is designed against: untrusted code the agent executes inside `~/Repositories` (npm installs, build scripts, test runners). Such code already runs with your privileges in the host's normal workflow; running it inside the container narrows what it can reach to the mounted paths.
 
-If you need a stronger boundary, enable Docker's `userns-remap` in `/etc/docker/daemon.json`.
+If you need a stronger boundary, enable Docker's `userns-remap` in `/etc/docker/daemon.json` — note this remaps bind-mount ownership through the subuid range, reintroducing the ownership-mismatch friction UID-matching exists to avoid.
+
+For the full rationale behind running as the host UID, the complete mounted-surface enumeration, and the alternatives considered and rejected (POSIX ACLs, rootless/userns-remap, Podman `--userns=keep-id`, named-volume-only), see the "Why the container runs as the host UID" section in [`CLAUDE.md`](../CLAUDE.md).
 
 ---
 

@@ -27,6 +27,30 @@ Do not re-litigate these without explicit user direction:
 | Git identity | Bind-mount host `~/.gitconfig` read-only |
 | Distribution UX | Host wrapper script `bin/agent-sandbox` wrapping `docker compose run` |
 
+## Why the container runs as the host UID
+
+The "Container user" decision above describes the *mechanism* (runtime-injected user, drop via `gosu`). This section is the *why* — captured so the decision isn't silently re-litigated. The decision is **keep UID-matching**.
+
+**Rationale.** The whole point of this container is an agent that edits your real repos in place via a bind mount. Running as the host UID/GID is the simplest correct ownership model for that: files the container writes into `Repositories` land owned by the host user — no `sudo`, no ACL drift, ownership "just works" bidirectionally.
+
+**Trade-off (inherent, not incidental).** Running as your UID means a container escape acts as your UID **over the mounted surface only** — it does *not* grant root. Docker namespace isolation and SSH-agent socket forwarding (no private keys ever enter the container) still hold. For a dev sandbox this is the accepted boundary; see [`docs/host-setup.md`](docs/host-setup.md) §9.
+
+**Mounted surface (everything visible inside the container — nothing else from the host):**
+
+- the projects dir (`PROJECTS_DIR`, default `~/Repositories`);
+- repo-local Claude state — `./.claude/` and `./.claude.json`;
+- the repo-local gh config dir;
+- the worktrunk config (`./docker/wt-config.toml`);
+- the host `~/.gitconfig`, mounted **read-only**;
+- the forwarded SSH agent socket (`$SSH_AUTH_SOCK`).
+
+**Alternatives considered & rejected:**
+
+- *POSIX ACLs* (`setfacl`, the original `plan.md` approach) — fragile and drift-prone; already abandoned.
+- *Rootless Docker / userns-remap* — cleaner isolation on paper, but bind-mount ownership gets remapped through the subuid range, reintroducing exactly the ownership-mismatch pain UID-matching avoids (plus more host setup).
+- *Podman `--userns=keep-id`* — functionally equivalent to what we do, just built in. A viable future port, **not** a security improvement.
+- *Named-volume-only (no repo bind mount)* — defeats the purpose (the agent must edit your real repos).
+
 ## Repository topology
 
 - This repo lives at `~/Repositories/agent-sandbox` on the maintainer's host as a **bare** repository (`.git/` inside a wrapper dir). There is no working tree at the bare-repo root — never edit there.
