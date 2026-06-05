@@ -6,9 +6,14 @@
 # Usage:
 #   ./bin/agent-sandbox setup             # one-time repo-local Claude state init
 #   ./bin/agent-sandbox build             # build agent image
-#   docker compose up -d playwright-mcp   # start playwright-mcp sidecar in background
-#   ./bin/agent-sandbox                   # interactive bash
+#   ./bin/agent-sandbox                   # interactive bash (auto-starts sidecar)
 #   ./bin/agent-sandbox claude            # launch Claude Code directly
+
+# Pin the project name as a backstop: bin/agent-sandbox exports
+# COMPOSE_PROJECT_NAME=agent-sandbox-${HOST_USER} (which takes precedence), but
+# this prevents a stray manual `docker compose` from forking a project keyed on
+# the working-dir basename and spawning a duplicate playwright-mcp sidecar.
+name: agent-sandbox
 
 services:
 

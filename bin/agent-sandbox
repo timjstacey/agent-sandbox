@@ -147,6 +147,12 @@ EOF
     exec docker compose -f "${COMPOSE_FILE}" build agent
     ;;
 
+  down)
+    # Stop the shared playwright-mcp sidecar and any agent containers under the
+    # wrapper's pinned project.
+    exec docker compose -f "${COMPOSE_FILE}" down
+    ;;
+
   *)
     # Preflight: ensure container-local claude state exists as the right kind
     # of inode before docker bind-mounts them (missing paths get auto-created
@@ -175,6 +181,12 @@ EOF
     resolve_gh_token
     GH_TOKEN_FLAG=()
     [[ -n "${GH_TOKEN:-}" ]] && GH_TOKEN_FLAG=(-e "GH_TOKEN=${GH_TOKEN}")
+
+    # Ensure the shared playwright-mcp sidecar is up under the wrapper's pinned
+    # project (agent-sandbox-${HOST_USER}) so it's reused across worktrees rather
+    # than forked per directory. depends_on covers run implicitly; doing it
+    # explicitly keeps the lifecycle clear and the single-sidecar invariant.
+    docker compose -f "${COMPOSE_FILE}" up -d playwright-mcp
 
     # bashrc function injects --mcp-config for interactive shell sessions, but
     # is not in scope when claude is passed as a subcommand (non-interactive).
