@@ -23,6 +23,7 @@ cd agent-sandbox
 ./bin/agent-sandbox build
 
 # Run an interactive shell inside the container
+# (the wrapper auto-starts the shared playwright-mcp sidecar)
 ./bin/agent-sandbox
 
 # Or launch Claude Code directly (first run prompts /login once)
