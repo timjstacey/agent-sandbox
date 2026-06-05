@@ -68,11 +68,17 @@ Prints `OK` or `FAIL` for each required path. Re-run `./bin/agent-sandbox setup`
 
 ## 6. GitHub authentication
 
-**Preferred path (host login):** Run `gh auth login` on the host before starting the container. Host `gh` stores the OAuth token in the system keyring (libsecret). `bin/agent-sandbox` extracts it via `gh auth token` and injects it as `GH_TOKEN` into the container — in-container `gh` picks it up automatically without any keyring service.
+`gh` authenticates **inside the container**, mirroring the Claude Code model — no host `gh` login is required and the host keyring is never read.
 
-**Fallback path (in-container login):** Run `gh auth login` inside the container. This works but stores the token **plaintext** in `~/.config/gh/hosts.yml` (no keyring service in the container). The file is `0600` and lives under a bind mount, so the token persists back to the host config directory. Acceptable for dev sandbox use; prefer host login for higher-sensitivity tokens.
+On first container use, run:
 
-If `~/.config/gh` doesn't exist on the host, `bin/agent-sandbox` creates an empty directory automatically and prints a note — the container still starts.
+```bash
+gh auth login
+```
+
+The token is stored **plaintext** in `~/.config/gh/hosts.yml` (no keyring service in the container), mode `0600`. That path is the repo-local, gitignored `./.config/gh` bind mount, so the session **persists across container restarts** — log in once, not every run.
+
+`bin/agent-sandbox setup` pre-creates `./.config/gh` as a directory so docker bind-mounts it correctly. Plaintext-at-rest is acceptable for a dev sandbox; if you need a stronger boundary for the token, scope it down at creation time.
 
 ---
 

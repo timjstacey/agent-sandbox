@@ -11,23 +11,6 @@ export HOST_UID="$(id -u)"
 export HOST_GID="$(id -g)"
 export COMPOSE_PROJECT_NAME="agent-sandbox-${HOST_USER}"
 
-# --- Resolve GH_TOKEN from host keyring ---
-# gh stores the OAuth token in the system keyring, not in ~/.config/gh/hosts.yml.
-# Inject it as GH_TOKEN so the in-container gh can authenticate without keyring access.
-resolve_gh_token() {
-  if ! command -v gh &>/dev/null; then
-    echo "Warning: gh not installed on host — container gh will be unauthenticated." >&2
-    return
-  fi
-  local token
-  token="$(gh auth token 2>/dev/null)" || true
-  if [[ -n "${token}" ]]; then
-    export GH_TOKEN="${token}"
-  else
-    echo "Warning: gh not authenticated on host — container gh will be unauthenticated. Run 'gh auth login' on host or 'gh auth login' inside the container." >&2
-  fi
-}
-
 # --- Dispatch ---
 case "${1:-}" in
 
@@ -61,9 +44,11 @@ EOF
       chmod 0600 "${REPO_DIR}/.claude.json"
     fi
 
-    if [[ ! -d "${HOME}/.config/gh" ]]; then
-      echo "Note: ${HOME}/.config/gh missing — creating empty dir. Run 'gh auth login' on host or inside the container." >&2
-      mkdir -p "${HOME}/.config/gh"
+    # Pre-create the repo-local gh config dir as a directory so docker
+    # bind-mounts it as a dir (not an auto-created file). gh auth login runs
+    # inside the container; the token persists here across restarts.
+    if [[ ! -d "${REPO_DIR}/.config/gh" ]]; then
+      mkdir -p "${REPO_DIR}/.config/gh"
     fi
 
     if [[ ! -f "${HOME}/.gitconfig" ]]; then
@@ -136,9 +121,9 @@ EOF
       && echo "repos write:  OK (${PROJECTS_DIR})" \
       || { echo "repos write:  FAIL (${PROJECTS_DIR}) — run setup"; ok=false; }
 
-    test -w "${HOME}/.config/gh" \
+    test -w "${REPO_DIR}/.config/gh" \
       && echo "gh write:     OK" \
-      || echo "gh write:     WARN (run 'gh auth login' on host or inside container)"
+      || echo "gh write:     WARN (run setup, then 'gh auth login' inside the container)"
 
     ${ok} && exit 0 || exit 1
     ;;
@@ -167,9 +152,8 @@ EOF
       exit 1
     fi
 
-    if [[ ! -d "${HOME}/.config/gh" ]]; then
-      echo "Note: ${HOME}/.config/gh missing — creating empty dir. Run 'gh auth login' on host (keyring) or inside the container (plaintext)." >&2
-      mkdir -p "${HOME}/.config/gh"
+    if [[ ! -d "${REPO_DIR}/.config/gh" ]]; then
+      mkdir -p "${REPO_DIR}/.config/gh"
     fi
 
     # If ass set AGENT_WORKDIR, pass it as the container working directory.
@@ -177,10 +161,6 @@ EOF
     if [[ -n "${AGENT_WORKDIR:-}" ]]; then
       WORKDIR_FLAG=(-w "${AGENT_WORKDIR}")
     fi
-
-    resolve_gh_token
-    GH_TOKEN_FLAG=()
-    [[ -n "${GH_TOKEN:-}" ]] && GH_TOKEN_FLAG=(-e "GH_TOKEN=${GH_TOKEN}")
 
     # Ensure the shared playwright-mcp sidecar is up under the wrapper's pinned
     # project (agent-sandbox-${HOST_USER}) so it's reused across worktrees rather
@@ -193,10 +173,10 @@ EOF
     # Inject the flag explicitly for that path.
     if [[ "${1:-}" == "claude" ]]; then
       shift
-      exec docker compose -f "${COMPOSE_FILE}" run --rm "${GH_TOKEN_FLAG[@]}" "${WORKDIR_FLAG[@]}" agent \
+      exec docker compose -f "${COMPOSE_FILE}" run --rm "${WORKDIR_FLAG[@]}" agent \
         claude --mcp-config "/home/${HOST_USER}/.claude/mcp-config.json" "$@"
     else
-      exec docker compose -f "${COMPOSE_FILE}" run --rm "${GH_TOKEN_FLAG[@]}" "${WORKDIR_FLAG[@]}" agent "$@"
+      exec docker compose -f "${COMPOSE_FILE}" run --rm "${WORKDIR_FLAG[@]}" agent "$@"
     fi
     ;;
 

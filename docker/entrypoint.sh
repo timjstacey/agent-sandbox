@@ -57,8 +57,8 @@ if [ ! -f "$MARKER" ] && [ "${SKIP_PROVISION:-0}" != "1" ]; then
 fi
 
 # Warn once per session if gh is not authenticated
-if [ -z "${GH_TOKEN:-}" ] && [ ! -s "$HOME_DIR/.config/gh/hosts.yml" ]; then
-  echo "[entrypoint] gh not authenticated. Run 'gh auth login' inside the container (plaintext) or on host (keyring) and rerun." >&2
+if [ ! -s "$HOME_DIR/.config/gh/hosts.yml" ]; then
+  echo "[entrypoint] gh not authenticated. Run 'gh auth login' inside the container; the token persists in the repo-local .config/gh." >&2
 fi
 
 exec gosu "$RESOLVED_USER" "$@"

@@ -26,7 +26,6 @@ services:
       HOST_UID:  "${HOST_UID:?}"
       HOST_GID:  "${HOST_GID:?}"
       SSH_AUTH_SOCK: /ssh-agent
-      GH_TOKEN: ${GH_TOKEN:-}
     depends_on:
       - playwright-mcp
     volumes:
@@ -39,9 +38,11 @@ services:
       - ./.claude.json:/home/${HOST_USER}/.claude.json
       # Worktrunk config
       - ./docker/wt-config.toml:/home/${HOST_USER}/.config/worktrunk/config.toml
-      # Identity + tool configs (wrapper creates host dirs if missing)
+      # Git identity: host ~/.gitconfig read-only (identity, not auth)
       - ${HOME}/.gitconfig:/home/${HOST_USER}/.gitconfig:ro
-      - ${HOME}/.config/gh:/home/${HOST_USER}/.config/gh
+      # gh auth: repo-local, gitignored. Login runs inside the container;
+      # the token persists here (plaintext hosts.yml, 0600) across restarts.
+      - ./.config/gh:/home/${HOST_USER}/.config/gh
       - ${SSH_AUTH_SOCK:-/tmp/ssh-auth-sock}:/ssh-agent
     networks:
       - internal
