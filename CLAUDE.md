@@ -95,7 +95,7 @@ Caveman's own plugin registers the `SessionStart` hook that activates caveman mo
 Two GitHub Actions workflows under `.github/workflows/`:
 
 - **`pr.yml`** (on PR to `main`) — `lint` job runs actionlint, hadolint (`Dockerfile`, ignoring `DL3008`), and `docker compose config --quiet`. `build-and-test` job builds the image (`load`, no push) and runs three smoke tests under `SKIP_PROVISION=1`: static tool versions (`fnm`/`gh`/`wt`/`git`), user/UID identity match, and the bashrc `claude()` `--mcp-config` shim.
-- **`build.yml`** (on push to `main`, `v*` tags, manual) — builds `linux/amd64` and pushes to GHCR `ghcr.io/timjstacey/agent-sandbox` with `latest` / semver / `sha-` tags. Uses a registry build cache (`:buildcache`).
+- **`build.yml`** (on push to `main`, `v*` tags, manual) — builds a multi-arch manifest (`linux/amd64` + `linux/arm64`, the arm64 leg via QEMU emulation for Apple Silicon) and pushes to GHCR `ghcr.io/timjstacey/agent-sandbox` with `latest` / semver / `sha-` tags. Uses a registry build cache (`:buildcache`). PR builds (`pr.yml`) stay amd64-only for speed.
 
 `SKIP_PROVISION=1` (consumed by `docker/entrypoint.sh`) skips first-run per-user provisioning so CI tests only the baked-in static layers.
 

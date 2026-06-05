@@ -152,8 +152,8 @@ Build + push image on push to `main` and on tags. Registry TBD — placeholder f
 
 Sketch:
 - Trigger: `push` to `main`, `push` of `v*` tag, `workflow_dispatch`
-- Job uses `docker/setup-buildx-action` + `docker/build-push-action`
-- Multi-platform: `linux/amd64` only initially (add `linux/arm64` later if needed)
+- Job uses `docker/setup-qemu-action` + `docker/setup-buildx-action` + `docker/build-push-action`
+- Multi-platform: `linux/amd64,linux/arm64` (arm64 leg built via QEMU emulation for Apple Silicon)
 - Tagging strategy via `docker/metadata-action`:
   - `latest` on default-branch push
   - `<semver>` and `<major>.<minor>` on tag push
