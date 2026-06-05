@@ -86,7 +86,7 @@ On a shared Docker daemon, each host user gets an isolated named volume via `COM
 
 The container has no per-user `~/.ssh` directory. To prevent `git push` and `gh pr create` from failing with `Host key verification failed` on the first SSH connection, the image bakes public host keys for the git remotes this project uses into `/etc/ssh/ssh_known_hosts` at build time.
 
-Currently seeded: `github.com`, `gitea.com`, `gitea.sillysamoyed.com`.
+Currently seeded: `github.com`.
 
 If a remote rotates its host key, or you add a new remote, edit the `ssh-keyscan` line in the `Dockerfile` (Layer 2b) and rebuild with `./bin/agent-sandbox build`.
 

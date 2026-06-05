@@ -21,7 +21,7 @@ Do not re-litigate these without explicit user direction:
 | Skills | Declared in committed `.claude/settings.json` via `extraKnownMarketplaces` + `enabledPlugins`; fetched from GitHub on first `claude` launch. No image baking — bumping = edit settings.json, delete plugin cache, no rebuild. |
 | Container user | **Run-time-injected** via entrypoint from `HOST_USER`/`HOST_UID`/`HOST_GID` env (set by `bin/agent-sandbox`). No build args. Container starts as root (`user: "0:0"`); entrypoint creates matching user and drops via `gosu`. Bind-mounted files appear owned by the host user. |
 | Bind-mount layout | Mirror host paths. The host projects dir is chosen at `setup` time (prompted, default `~/Repositories`) and written to gitignored `.env` as `PROJECTS_DIR` + `PROJECTS_BASENAME`; compose mounts `${PROJECTS_DIR}:/home/${HOST_USER}/${PROJECTS_BASENAME}` so container ↔ host paths match. Container `$HOME` = `/home/${HOST_USER}`, identical to host. |
-| Git push creds | Forward host SSH agent socket (`$SSH_AUTH_SOCK`), never copy keys. Public host keys for git remotes (`github.com`, `gitea.com`, `gitea.sillysamoyed.com`) are baked into `/etc/ssh/ssh_known_hosts` at image build time — rebuild to rotate or add hosts. |
+| Git push creds | Forward host SSH agent socket (`$SSH_AUTH_SOCK`), never copy keys. Public host keys for git remotes (`github.com`) are baked into `/etc/ssh/ssh_known_hosts` at image build time — rebuild to rotate or add hosts. |
 | Toolchain provisioning | `fnm`, `gh`, `wt`, `gosu` baked into image (static binaries / apt). Node + pnpm + bun + claude + typescript provisioned per-user on **first container run** into named volume `agent-home`. Marker file `~/.agent-sandbox-provisioned` gates re-runs. |
 | gh auth | Host login preferred — gh stores in keyring, `bin/agent-sandbox` injects `GH_TOKEN` env. Host-not-logged-in is non-fatal: wrapper creates empty `~/.config/gh` dir, container can run `gh auth login` inline (plaintext, persisted via bind mount). |
 | Git identity | Bind-mount host `~/.gitconfig` read-only |
@@ -30,7 +30,7 @@ Do not re-litigate these without explicit user direction:
 ## Repository topology
 
 - This repo lives at `~/Repositories/agent-sandbox` on the maintainer's host as a **bare** repository (`.git/` inside a wrapper dir). There is no working tree at the bare-repo root — never edit there.
-- Remote: `git@github.com:timjstacey/agent-sandbox.git` (GitHub). The plan originally targeted self-hosted Gitea; the live remote is GitHub.
+- Remote: `git@github.com:timjstacey/agent-sandbox.git` (GitHub).
 - Worktrees are managed by [worktrunk](https://github.com/max-sixty/worktrunk). Create one with `wt switch <branch>` (or `wt switch -c <new-branch>`) before editing.
 - Default worktree path for this repo is `~/Repositories/agent-sandbox/.git.<branch>` — not a typo, that's how `wt` names worktrees of a bare repo without a per-project `worktree-path` template.
 
